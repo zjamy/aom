@@ -12,8 +12,8 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include "./aom_config.h"
-#include "./aom_dsp_rtcd.h"
+#include "config/aom_config.h"
+#include "config/aom_dsp_rtcd.h"
 
 #include "aom/aom_integer.h"
 #include "aom_ports/mem.h"
@@ -40,7 +40,7 @@ void aom_plane_add_noise_c(uint8_t *start, char *noise, char blackclamp[16],
 }
 
 static double gaussian(double sigma, double mu, double x) {
-  return 1 / (sigma * sqrt(2.0 * 3.14159265)) *
+  return 1 / (sigma * sqrt(2.0 * PI)) *
          (exp(-(x - mu) * (x - mu) / (2 * sigma * sigma)));
 }
 

@@ -7,7 +7,9 @@
  * obtain it at www.aomedia.org/license/software. If the Alliance for Open
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
-*/
+ */
+
+#include <memory>
 
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
@@ -50,9 +52,7 @@ const TestVideoParam kTestVectors[] = {
   { "hantro_collage_w352h288.yuv", 352, 288, 30, 1, 8, AOM_IMG_FMT_I420,
     AOM_BITS_8, 0 },
   { "rush_hour_444.y4m", 352, 288, 30, 1, 8, AOM_IMG_FMT_I444, AOM_BITS_8, 1 },
-#if CONFIG_HIGHBITDEPTH
-// Add list of profile 2/3 test videos here ...
-#endif  // CONFIG_HIGHBITDEPTH
+  // Add list of profile 2/3 test videos here ...
 };
 
 const TestEncodeParam kEncodeVectors[] = {
@@ -187,7 +187,7 @@ TEST_P(ArfFreqTestLarge, MinArfFreqTest) {
   init_flags_ = AOM_CODEC_USE_PSNR;
   if (cfg_.g_bit_depth > 8) init_flags_ |= AOM_CODEC_USE_HIGHBITDEPTH;
 
-  testing::internal::scoped_ptr<libaom_test::VideoSource> video;
+  std::unique_ptr<libaom_test::VideoSource> video;
   if (is_extension_y4m(test_video_param_.filename)) {
     video.reset(new libaom_test::Y4mVideoSource(test_video_param_.filename, 0,
                                                 kFrames));
@@ -208,7 +208,6 @@ TEST_P(ArfFreqTestLarge, MinArfFreqTest) {
   }
 }
 
-#if CONFIG_HIGHBITDEPTH || CONFIG_EXT_REFS
 #if CONFIG_AV1_ENCODER
 // TODO(angiebird): 25-29 fail in high bitdepth mode.
 // TODO(zoeliu): This ArfFreqTest does not work with BWDREF_FRAME, as
@@ -223,9 +222,4 @@ INSTANTIATE_TEST_CASE_P(
         ::testing::ValuesIn(kTestVectors), ::testing::ValuesIn(kEncodeVectors),
         ::testing::ValuesIn(kMinArfVectors)));
 #endif  // CONFIG_AV1_ENCODER
-#else
-AV1_INSTANTIATE_TEST_CASE(ArfFreqTestLarge, ::testing::ValuesIn(kTestVectors),
-                          ::testing::ValuesIn(kEncodeVectors),
-                          ::testing::ValuesIn(kMinArfVectors));
-#endif  // CONFIG_HIGHBITDEPTH || CONFIG_EXT_REFS
 }  // namespace

@@ -8,8 +8,8 @@
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
-#ifndef AOM_AOM_ENCODER_H_
-#define AOM_AOM_ENCODER_H_
+#ifndef AOM_AOM_AOM_ENCODER_H_
+#define AOM_AOM_AOM_ENCODER_H_
 
 /*!\defgroup encoder Encoder Algorithm Interface
  * \ingroup codec
@@ -30,7 +30,7 @@
 extern "C" {
 #endif
 
-#include "./aom_codec.h"
+#include "aom/aom_codec.h"
 
 /*!\brief Current ABI version number
  *
@@ -41,7 +41,7 @@ extern "C" {
  * fields to structures
  */
 #define AOM_ENCODER_ABI_VERSION \
-  (5 + AOM_CODEC_ABI_VERSION) /**<\hideinitializer*/
+  (7 + AOM_CODEC_ABI_VERSION) /**<\hideinitializer*/
 
 /*! \brief Encoder capabilities bitfield
  *
@@ -53,13 +53,6 @@ extern "C" {
  *  The available flags are specified by AOM_CODEC_CAP_* defines.
  */
 #define AOM_CODEC_CAP_PSNR 0x10000 /**< Can issue PSNR packets */
-
-/*! Can output one partition at a time. Each partition is returned in its
- *  own AOM_CODEC_CX_FRAME_PKT, with the FRAME_IS_FRAGMENT flag set for
- *  every partition but the last. In this mode all frames are always
- *  returned partition by partition.
- */
-#define AOM_CODEC_CAP_OUTPUT_PARTITION 0x20000
 
 /*! Can support input images at greater than 8 bitdepth.
  */
@@ -74,7 +67,6 @@ extern "C" {
  */
 #define AOM_CODEC_USE_PSNR 0x10000 /**< Calculate PSNR on each frame */
 /*!\brief Make the encoder output one  partition at a time. */
-#define AOM_CODEC_USE_OUTPUT_PARTITION 0x20000
 #define AOM_CODEC_USE_HIGHBITDEPTH 0x40000 /**< Use high bitdepth */
 
 /*!\brief Generic fixed size buffer structure
@@ -82,7 +74,7 @@ extern "C" {
  * This structure is able to hold a reference to any fixed size buffer.
  */
 typedef struct aom_fixed_buf {
-  void *buf;       /**< Pointer to the data */
+  void *buf;       /**< Pointer to the data. Does NOT own the data! */
   size_t sz;       /**< Length of the buffer, in chars */
 } aom_fixed_buf_t; /**< alias for struct aom_fixed_buf */
 
@@ -105,10 +97,14 @@ typedef uint32_t aom_codec_frame_flags_t;
 /*!\brief frame can be dropped without affecting the stream (no future frame
  * depends on this one) */
 #define AOM_FRAME_IS_DROPPABLE 0x2
-/*!\brief frame should be decoded but will not be shown */
-#define AOM_FRAME_IS_INVISIBLE 0x4
-/*!\brief this is a fragment of the encoded frame */
-#define AOM_FRAME_IS_FRAGMENT 0x8
+/*!\brief this is an INTRA_ONLY frame */
+#define AOM_FRAME_IS_INTRAONLY 0x10
+/*!\brief this is an S-frame */
+#define AOM_FRAME_IS_SWITCH 0x20
+/*!\brief this is an error-resilient frame */
+#define AOM_FRAME_IS_ERROR_RESILIENT 0x40
+/*!\brief this is a key-frame dependent recovery-point frame */
+#define AOM_FRAME_IS_DELAYED_RANDOM_ACCESS_POINT 0x80
 
 /*!\brief Error Resilient flags
  *
@@ -119,11 +115,6 @@ typedef uint32_t aom_codec_frame_flags_t;
 typedef uint32_t aom_codec_er_flags_t;
 /*!\brief Improve resiliency against losses of whole frames */
 #define AOM_ERROR_RESILIENT_DEFAULT 0x1
-/*!\brief The frame partitions are independently decodable by the bool decoder,
- * meaning that partitions can be decoded even though earlier partitions have
- * been lost. Note that intra prediction is still done over the partition
- * boundary. */
-#define AOM_ERROR_RESILIENT_PARTITIONS 0x2
 
 /*!\brief Encoder output packet variants
  *
@@ -159,6 +150,8 @@ typedef struct aom_codec_cx_pkt {
        * Only applicable when "output partition" mode is enabled. First
        * partition has id 0.*/
       int partition_id;
+      /*!\brief size of the visible frame in this packet */
+      size_t vis_frame_size;
     } frame;                            /**< data for compressed frame packet */
     aom_fixed_buf_t twopass_stats;      /**< data for two-pass packet */
     aom_fixed_buf_t firstpass_mb_stats; /**< first pass mb packet */
@@ -215,6 +208,158 @@ enum aom_kf_mode {
   AOM_KF_AUTO,        /**< Encoder determines optimal placement automatically */
   AOM_KF_DISABLED = 0 /**< Encoder does not place keyframes. */
 };
+
+/*!\brief Encoder Config Options
+ *
+ * This type allows to enumerate and control flags defined for encoder control
+ * via config file at runtime.
+ */
+typedef struct cfg_options {
+  /*!\brief Indicate init by cfg file
+   * 0 or 1
+   */
+  unsigned int init_by_cfg_file;
+  /*!\brief Superblock size
+   * 0, 64 or 128
+   */
+  unsigned int super_block_size;
+  /*!\brief max partition size
+   * 8, 16, 32, 64, 128
+   */
+  unsigned int max_partition_size;
+  /*!\brief min partition size
+   * 8, 16, 32, 64, 128
+   */
+  unsigned int min_partition_size;
+  /*!\brief disable AB Shape partition type
+   *
+   */
+  unsigned int disable_ab_partition_type;
+  /*!\brief disable rectangular partition type
+   *
+   */
+  unsigned int disable_rect_partition_type;
+  /*!\brief disable 1:4/4:1 partition type
+   *
+   */
+  unsigned int disable_1to4_partition_type;
+  /*!\brief disable flip and identity transform type
+   *
+   */
+  unsigned int disable_flip_idtx;
+  /*!\brief disable CDEF filter
+   *
+   */
+  unsigned int disable_cdef;
+  /*!\brief disable Loop Restoration Filter
+   *
+   */
+  unsigned int disable_lr;
+  /*!\brief disable OBMC
+   *
+   */
+  unsigned int disable_obmc;
+  /*!\brief disable Warped Motion
+   *
+   */
+  unsigned int disable_warp_motion;
+  /*!\brief disable global motion
+   *
+   */
+  unsigned int disable_global_motion;
+  /*!\brief disable dist weighted compound
+   *
+   */
+  unsigned int disable_dist_wtd_comp;
+  /*!\brief disable diff weighted compound
+   *
+   */
+  unsigned int disable_diff_wtd_comp;
+  /*!\brief disable inter/intra compound
+   *
+   */
+  unsigned int disable_inter_intra_comp;
+  /*!\brief disable masked compound
+   *
+   */
+  unsigned int disable_masked_comp;
+  /*!\brief disable one sided compound
+   *
+   */
+  unsigned int disable_one_sided_comp;
+  /*!\brief disable Palette
+   *
+   */
+  unsigned int disable_palette;
+  /*!\brief disable Intra Block Copy
+   *
+   */
+  unsigned int disable_intrabc;
+  /*!\brief disable chroma from luma
+   *
+   */
+  unsigned int disable_cfl;
+  /*!\brief disable intra smooth mode
+   *
+   */
+  unsigned int disable_smooth_intra;
+  /*!\brief disable filter intra
+   *
+   */
+  unsigned int disable_filter_intra;
+  /*!\brief disable dual filter
+   *
+   */
+  unsigned int disable_dual_filter;
+  /*!\brief disable intra angle delta
+   *
+   */
+  unsigned int disable_intra_angle_delta;
+  /*!\brief specify transform size search method
+   * 0:FULLRD,1:FASTRD,2:USELARGEST
+   */
+  unsigned int tx_size_search_method;
+  /*!\brief disable intra edge filter
+   *
+   */
+  unsigned int disable_intra_edge_filter;
+  /*!\brief disable 64x64 transform
+   *
+   */
+  unsigned int disable_tx_64x64;
+  /*!\brief disable smooth inter/intra
+   *
+   */
+  unsigned int disable_smooth_inter_intra;
+  /*!\brief disable inter/inter wedge comp
+   *
+   */
+  unsigned int disable_inter_inter_wedge;
+  /*!\brief disable inter/intra wedge comp
+   *
+   */
+  unsigned int disable_inter_intra_wedge;
+  /*!\brief disable paeth intra
+   *
+   */
+  unsigned int disable_paeth_intra;
+  /*!\brief disable trellis quantization
+   *
+   */
+  unsigned int disable_trellis_quant;
+  /*!\brief disable ref frame MV
+   *
+   */
+  unsigned int disable_ref_frame_mv;
+  /*!\brief use reduced reference frame set
+   *
+   */
+  unsigned int reduced_reference_set;
+  /*!\brief use reduced transform type set
+   *
+   */
+  unsigned int reduced_tx_type_set;
+} cfg_options_t;
 
 /*!\brief Encoded Frame Flags
  *
@@ -281,6 +426,25 @@ typedef struct aom_codec_enc_cfg {
    * resolution, independent of any spatial resampling the encoder may do.
    */
   unsigned int g_h;
+
+  /*!\brief Max number of frames to encode
+   *
+   */
+  unsigned int g_limit;
+
+  /*!\brief Forced maximum width of the frame
+   *
+   * If this value is non-zero then it is used to force the maximum frame
+   * width written in write_sequence_header().
+   */
+  unsigned int g_forced_max_frame_width;
+
+  /*!\brief Forced maximum height of the frame
+   *
+   * If this value is non-zero then it is used to force the maximum frame
+   * height written in write_sequence_header().
+   */
+  unsigned int g_forced_max_frame_height;
 
   /*!\brief Bit-depth of the codec
    *
@@ -372,21 +536,21 @@ typedef struct aom_codec_enc_cfg {
    */
   unsigned int rc_resize_mode;
 
-  /*!\brief Frame resize numerator.
+  /*!\brief Frame resize denominator.
    *
-   * The numerator for resize to use, assuming 16 as the denominator.
+   * The denominator for resize to use, assuming 8 as the numerator.
    *
-   * Valid numerators are  8 - 16 for now.
+   * Valid denominators are  8 - 16 for now.
    */
-  unsigned int rc_resize_numerator;
+  unsigned int rc_resize_denominator;
 
-  /*!\brief Keyframe resize numerator.
+  /*!\brief Keyframe resize denominator.
    *
-   * The numerator for resize to use, assuming 16 as the denominator.
+   * The denominator for resize to use, assuming 8 as the numerator.
    *
-   * Valid numerators are  8 - 16 for now.
+   * Valid denominators are  8 - 16 for now.
    */
-  unsigned int rc_resize_kf_numerator;
+  unsigned int rc_resize_kf_denominator;
 
   /*!\brief Frame super-resolution scaling mode.
    *
@@ -394,32 +558,49 @@ typedef struct aom_codec_enc_cfg {
    * upscaling after the encode/decode process. Taking control of upscaling and
    * using restoration filters should allow it to outperform normal resizing.
    *
-   * Mode 0 is SUPERRES_NONE, mode 1 is SUPERRES_FIXED, and mode 2 is
-   * SUPERRES_DYNAMIC.
+   * Valid values are 0 to 4 as defined in enum SUPERRES_MODE.
    */
   unsigned int rc_superres_mode;
 
-  /*!\brief Frame super-resolution numerator.
+  /*!\brief Frame super-resolution denominator.
    *
-   * The numerator for superres to use. If fixed it will only change if the
+   * The denominator for superres to use. If fixed it will only change if the
    * cumulative scale change over resizing and superres is greater than 1/2;
    * this forces superres to reduce scaling.
    *
-   * Valid numerators are 8 to 16.
+   * Valid denominators are 8 to 16.
    *
-   * Ignored by SUPERRES_DYNAMIC.
+   * Used only by SUPERRES_FIXED.
    */
-  unsigned int rc_superres_numerator;
+  unsigned int rc_superres_denominator;
 
-  /*!\brief Keyframe super-resolution numerator.
+  /*!\brief Keyframe super-resolution denominator.
    *
-   * The numerator for superres to use. If fixed it will only change if the
+   * The denominator for superres to use. If fixed it will only change if the
    * cumulative scale change over resizing and superres is greater than 1/2;
    * this forces superres to reduce scaling.
    *
-   * Valid numerators are 8 - 16 for now.
+   * Valid denominators are 8 - 16 for now.
    */
-  unsigned int rc_superres_kf_numerator;
+  unsigned int rc_superres_kf_denominator;
+
+  /*!\brief Frame super-resolution q threshold.
+   *
+   * The q level threshold after which superres is used.
+   * Valid values are 1 to 63.
+   *
+   * Used only by SUPERRES_QTHRESH
+   */
+  unsigned int rc_superres_qthresh;
+
+  /*!\brief Keyframe super-resolution q threshold.
+   *
+   * The q level threshold after which superres is used for key frames.
+   * Valid values are 1 to 63.
+   *
+   * Used only by SUPERRES_QTHRESH
+   */
+  unsigned int rc_superres_kf_qthresh;
 
   /*!\brief Rate control algorithm to use.
    *
@@ -568,6 +749,11 @@ typedef struct aom_codec_enc_cfg {
    * keyframing settings (kf)
    */
 
+  /*!\brief Option to enable forward reference key frame
+   *
+   */
+  int fwd_kf_enabled;
+
   /*!\brief Keyframe placement mode
    *
    * This value indicates whether the encoder should place keyframes at a
@@ -593,6 +779,107 @@ typedef struct aom_codec_enc_cfg {
    * equal to kf_max_dist for a fixed interval.
    */
   unsigned int kf_max_dist;
+
+  /*!\brief sframe interval
+   *
+   * This value, expressed as a number of frames, forces the encoder to code
+   * an S-Frame every sframe_dist frames.
+   */
+  unsigned int sframe_dist;
+
+  /*!\brief sframe insertion mode
+   *
+   * This value must be set to 1 or 2, and tells the encoder how to insert
+   * S-Frames. It will only have an effect if sframe_dist != 0.
+   *
+   * If altref is enabled:
+   *   - if sframe_mode == 1, the considered frame will be made into an
+   *     S-Frame only if it is an altref frame
+   *   - if sframe_mode == 2, the next altref frame will be made into an
+   *     S-Frame.
+   *
+   * Otherwise: the considered frame will be made into an S-Frame.
+   */
+  unsigned int sframe_mode;
+
+  /*!\brief Tile coding mode
+   *
+   * This value indicates the tile coding mode.
+   * A value of 0 implies a normal non-large-scale tile coding. A value of 1
+   * implies a large-scale tile coding.
+   */
+  unsigned int large_scale_tile;
+
+  /*!\brief Monochrome mode
+   *
+   * If this is nonzero, the encoder will generate a monochrome stream
+   * with no chroma planes.
+   */
+  unsigned int monochrome;
+
+  /*!\brief full_still_picture_hdr
+   *
+   * If this is nonzero, the encoder will generate a full header even for
+   * still picture encoding. if zero, a reduced header is used for still
+   * picture. This flag has no effect when a regular video with more than
+   * a single frame is encoded.
+   */
+  unsigned int full_still_picture_hdr;
+
+  /*!\brief Bitstream syntax mode
+   *
+   * This value indicates the bitstream syntax mode.
+   * A value of 0 indicates bitstream is saved as Section 5 bitstream. A value
+   * of 1 indicates the bitstream is saved in Annex-B format
+   */
+  unsigned int save_as_annexb;
+
+  /*!\brief Number of explicit tile widths specified
+   *
+   * This value indicates the number of tile widths specified
+   * A value of 0 implies no tile widths are specified.
+   * Tile widths are given in the array tile_widths[]
+   */
+  int tile_width_count;
+
+  /*!\brief Number of explicit tile heights specified
+   *
+   * This value indicates the number of tile heights specified
+   * A value of 0 implies no tile heights are specified.
+   * Tile heights are given in the array tile_heights[]
+   */
+  int tile_height_count;
+
+/*!\brief Maximum number of tile widths in tile widths array
+ *
+ * This define gives the maximum number of elements in the tile_widths array.
+ */
+#define MAX_TILE_WIDTHS 64  // maximum tile width array length
+
+  /*!\brief Array of specified tile widths
+   *
+   * This array specifies tile widths (and may be empty)
+   * The number of widths specified is given by tile_width_count
+   */
+  int tile_widths[MAX_TILE_WIDTHS];
+
+/*!\brief Maximum number of tile heights in tile heights array.
+ *
+ * This define gives the maximum number of elements in the tile_heights array.
+ */
+#define MAX_TILE_HEIGHTS 64  // maximum tile height array length
+
+  /*!\brief Array of specified tile heights
+   *
+   * This array specifies tile heights (and may be empty)
+   * The number of heights specified is given by tile_height_count
+   */
+  int tile_heights[MAX_TILE_HEIGHTS];
+
+  /*!\brief Options defined per config file
+   *
+   */
+  cfg_options_t encoder_cfg;
 } aom_codec_enc_cfg_t; /**< alias for struct aom_codec_enc_cfg */
 
 /*!\brief Initialize an encoder instance
@@ -608,7 +895,7 @@ typedef struct aom_codec_enc_cfg {
  *
  * \param[in]    ctx     Pointer to this instance's context.
  * \param[in]    iface   Pointer to the algorithm interface to use.
- * \param[in]    cfg     Configuration to use, if known. May be NULL.
+ * \param[in]    cfg     Configuration to use, if known.
  * \param[in]    flags   Bitfield of AOM_CODEC_USE_* flags
  * \param[in]    ver     ABI version number. Must be set to
  *                       AOM_ENCODER_ABI_VERSION
@@ -638,7 +925,7 @@ aom_codec_err_t aom_codec_enc_init_ver(aom_codec_ctx_t *ctx,
  *
  * \param[in]    ctx     Pointer to this instance's context.
  * \param[in]    iface   Pointer to the algorithm interface to use.
- * \param[in]    cfg     Configuration to use, if known. May be NULL.
+ * \param[in]    cfg     Configuration to use, if known.
  * \param[in]    num_enc Total number of encoders.
  * \param[in]    flags   Bitfield of AOM_CODEC_USE_* flags
  * \param[in]    dsf     Pointer to down-sampling factors.
@@ -704,32 +991,37 @@ aom_codec_err_t aom_codec_enc_config_set(aom_codec_ctx_t *ctx,
 /*!\brief Get global stream headers
  *
  * Retrieves a stream level global header packet, if supported by the codec.
+ * Calls to this function should be deferred until all configuration information
+ * has been passed to libaom. Otherwise the global header data may be
+ * invalidated by additional configuration changes.
+ *
+ * The AV1 implementation of this function returns an OBU. The OBU returned is
+ * in Low Overhead Bitstream Format. Specifically, the obu_has_size_field bit is
+ * set, and the buffer contains the obu_size field for the returned OBU.
  *
  * \param[in]    ctx     Pointer to this instance's context
  *
  * \retval NULL
- *     Encoder does not support global header
+ *     Encoder does not support global header, or an error occurred while
+ *     generating the global header.
+ *
  * \retval Non-NULL
- *     Pointer to buffer containing global header packet
+ *     Pointer to buffer containing global header packet. The caller owns the
+ *     memory associated with this buffer, and must free the 'buf' member of the
+ *     aom_fixed_buf_t as well as the aom_fixed_buf_t pointer. Memory returned
+ *     must be freed via call to free().
  */
 aom_fixed_buf_t *aom_codec_get_global_headers(aom_codec_ctx_t *ctx);
 
-/*!\brief deadline parameter analogous to  AVx GOOD QUALITY mode. */
-#define AOM_DL_GOOD_QUALITY (1000000)
+/*!\brief usage parameter analogous to AV1 GOOD QUALITY mode. */
+#define AOM_USAGE_GOOD_QUALITY (0)
+/*!\brief usage parameter analogous to AV1 REALTIME mode. */
+#define AOM_USAGE_REALTIME (1)
+
 /*!\brief Encode a frame
  *
  * Encodes a video frame at the given "presentation time." The presentation
  * time stamp (PTS) \ref MUST be strictly increasing.
- *
- * The encoder supports the notion of a soft real-time deadline. Given a
- * non-zero value to the deadline parameter, the encoder will make a "best
- * effort" guarantee to  return before the given time slice expires. It is
- * implicit that limiting the available time to encode will degrade the
- * output quality. The encoder can be given an unlimited time to produce the
- * best possible frame by specifying a deadline of '0'. This deadline
- * supercedes the AVx notion of "best quality, good quality, realtime".
- * Applications that wish to map these former settings to the new deadline
- * based system can use the symbol #AOM_DL_GOOD_QUALITY.
  *
  * When the last frame has been passed to the encoder, this function should
  * continue to be called, with the img parameter set to NULL. This will
@@ -742,7 +1034,6 @@ aom_fixed_buf_t *aom_codec_get_global_headers(aom_codec_ctx_t *ctx);
  * \param[in]    pts       Presentation time stamp, in timebase units.
  * \param[in]    duration  Duration to show frame, in timebase units.
  * \param[in]    flags     Flags to use for encoding this frame.
- * \param[in]    deadline  Time to spend encoding, in microseconds. (0=infinite)
  *
  * \retval #AOM_CODEC_OK
  *     The configuration was populated.
@@ -753,8 +1044,7 @@ aom_fixed_buf_t *aom_codec_get_global_headers(aom_codec_ctx_t *ctx);
  */
 aom_codec_err_t aom_codec_encode(aom_codec_ctx_t *ctx, const aom_image_t *img,
                                  aom_codec_pts_t pts, unsigned long duration,
-                                 aom_enc_frame_flags_t flags,
-                                 unsigned long deadline);
+                                 aom_enc_frame_flags_t flags);
 
 /*!\brief Set compressed data output buffer
  *
@@ -848,4 +1138,4 @@ const aom_image_t *aom_codec_get_preview_frame(aom_codec_ctx_t *ctx);
 #ifdef __cplusplus
 }
 #endif
-#endif  // AOM_AOM_ENCODER_H_
+#endif  // AOM_AOM_AOM_ENCODER_H_

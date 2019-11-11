@@ -1,3 +1,14 @@
+/*
+ * Copyright (c) 2018, Alliance for Open Media. All rights reserved
+ *
+ * This source code is subject to the terms of the BSD 2 Clause License and
+ * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
+ * was not distributed with this source code in the LICENSE file, you can
+ * obtain it at www.aomedia.org/license/software. If the Alliance for Open
+ * Media Patent License 1.0 was not distributed with this source code in the
+ * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
+ */
+
 #include <stdlib.h>
 #include <memory.h>
 #include <math.h>
@@ -5,13 +16,15 @@
 
 #include <smmintrin.h>
 
-#include "./av1_rtcd.h"
+#include "config/av1_rtcd.h"
+
 #include "aom_ports/mem.h"
+#include "aom_ports/system_state.h"
 #include "av1/encoder/corner_match.h"
 
-DECLARE_ALIGNED(16, static const uint8_t, byte_mask[16]) = {
-  255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0
-};
+DECLARE_ALIGNED(16, static const uint8_t,
+                byte_mask[16]) = { 255, 255, 255, 255, 255, 255, 255, 255,
+                                   255, 255, 255, 255, 255, 0,   0,   0 };
 #if MATCH_SZ != 13
 #error "Need to change byte_mask in corner_match_sse4.c if MATCH_SZ != 13"
 #endif
@@ -20,9 +33,9 @@ DECLARE_ALIGNED(16, static const uint8_t, byte_mask[16]) = {
    correlation/standard deviation are taken over MATCH_SZ by MATCH_SZ windows
    of each image, centered at (x1, y1) and (x2, y2) respectively.
 */
-double compute_cross_correlation_sse4_1(unsigned char *im1, int stride1, int x1,
-                                        int y1, unsigned char *im2, int stride2,
-                                        int x2, int y2) {
+double av1_compute_cross_correlation_sse4_1(unsigned char *im1, int stride1,
+                                            int x1, int y1, unsigned char *im2,
+                                            int stride2, int x2, int y2) {
   int i;
   // 2 16-bit partial sums in lanes 0, 4 (== 2 32-bit partial sums in lanes 0,
   // 2)
@@ -87,5 +100,6 @@ double compute_cross_correlation_sse4_1(unsigned char *im1, int stride1, int x1,
 
   int var2 = sumsq2 * MATCH_SZ_SQ - sum2 * sum2;
   int cov = cross * MATCH_SZ_SQ - sum1 * sum2;
+  aom_clear_system_state();
   return cov / sqrt((double)var2);
 }

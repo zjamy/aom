@@ -9,12 +9,14 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AOM_DSP_X86_SYNONYMS_H_
-#define AOM_DSP_X86_SYNONYMS_H_
+#ifndef AOM_AOM_DSP_X86_SYNONYMS_H_
+#define AOM_AOM_DSP_X86_SYNONYMS_H_
 
 #include <immintrin.h>
+#include <string.h>
 
-#include "./aom_config.h"
+#include "config/aom_config.h"
+
 #include "aom/aom_integer.h"
 
 /**
@@ -27,7 +29,9 @@
 // Loads and stores to do away with the tedium of casting the address
 // to the right type.
 static INLINE __m128i xx_loadl_32(const void *a) {
-  return _mm_cvtsi32_si128(*(const uint32_t *)a);
+  int val;
+  memcpy(&val, a, sizeof(val));
+  return _mm_cvtsi32_si128(val);
 }
 
 static INLINE __m128i xx_loadl_64(const void *a) {
@@ -43,7 +47,8 @@ static INLINE __m128i xx_loadu_128(const void *a) {
 }
 
 static INLINE void xx_storel_32(void *const a, const __m128i v) {
-  *(uint32_t *)a = _mm_cvtsi128_si32(v);
+  const int val = _mm_cvtsi128_si32(v);
+  memcpy(a, &val, sizeof(val));
 }
 
 static INLINE void xx_storel_64(void *const a, const __m128i v) {
@@ -56,6 +61,28 @@ static INLINE void xx_store_128(void *const a, const __m128i v) {
 
 static INLINE void xx_storeu_128(void *const a, const __m128i v) {
   _mm_storeu_si128((__m128i *)a, v);
+}
+
+// The _mm_set_epi64x() intrinsic is undefined for some Visual Studio
+// compilers. The following function is equivalent to _mm_set_epi64x()
+// acting on 32-bit integers.
+static INLINE __m128i xx_set_64_from_32i(int32_t e1, int32_t e0) {
+#if defined(_MSC_VER) && _MSC_VER < 1900
+  return _mm_set_epi32(0, e1, 0, e0);
+#else
+  return _mm_set_epi64x((uint32_t)e1, (uint32_t)e0);
+#endif
+}
+
+// The _mm_set1_epi64x() intrinsic is undefined for some Visual Studio
+// compilers. The following function is equivalent to _mm_set1_epi64x()
+// acting on a 32-bit integer.
+static INLINE __m128i xx_set1_64_from_32i(int32_t a) {
+#if defined(_MSC_VER) && _MSC_VER < 1900
+  return _mm_set_epi32(0, a, 0, a);
+#else
+  return _mm_set1_epi64x((uint32_t)a);
+#endif
 }
 
 static INLINE __m128i xx_round_epu16(__m128i v_val_w) {
@@ -80,13 +107,12 @@ static INLINE __m128i xx_roundn_epi32_unsigned(__m128i v_val_d, int bits) {
   return _mm_srai_epi32(v_tmp_d, bits);
 }
 
-// This is equivalent to ROUND_POWER_OF_TWO_SIGNED(v_val_d, bits)
-static INLINE __m128i xx_roundn_epi32(__m128i v_val_d, int bits) {
-  const __m128i v_bias_d = _mm_set1_epi32((1 << bits) >> 1);
-  const __m128i v_sign_d = _mm_srai_epi32(v_val_d, 31);
+static INLINE __m128i xx_roundn_epi16(__m128i v_val_d, int bits) {
+  const __m128i v_bias_d = _mm_set1_epi16((1 << bits) >> 1);
+  const __m128i v_sign_d = _mm_srai_epi16(v_val_d, 15);
   const __m128i v_tmp_d =
-      _mm_add_epi32(_mm_add_epi32(v_val_d, v_bias_d), v_sign_d);
-  return _mm_srai_epi32(v_tmp_d, bits);
+      _mm_add_epi16(_mm_add_epi16(v_val_d, v_bias_d), v_sign_d);
+  return _mm_srai_epi16(v_tmp_d, bits);
 }
 
-#endif  // AOM_DSP_X86_SYNONYMS_H_
+#endif  // AOM_AOM_DSP_X86_SYNONYMS_H_

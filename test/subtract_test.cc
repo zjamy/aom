@@ -7,23 +7,20 @@
  * obtain it at www.aomedia.org/license/software. If the Alliance for Open
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
-*/
+ */
 
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
-#include "./aom_config.h"
-#include "./aom_dsp_rtcd.h"
+#include "config/aom_config.h"
+#include "config/aom_dsp_rtcd.h"
+
 #include "test/acm_random.h"
 #include "test/clear_system_state.h"
 #include "test/register_state_check.h"
 #include "test/util.h"
-#if CONFIG_AV1
 #include "av1/common/blockd.h"
-#endif
 #include "aom_mem/aom_mem.h"
 #include "aom_ports/mem.h"
-
-#define USE_SPEED_TEST (0)
 
 typedef void (*SubtractFunc)(int rows, int cols, int16_t *diff_ptr,
                              ptrdiff_t diff_stride, const uint8_t *src_ptr,
@@ -107,19 +104,19 @@ INSTANTIATE_TEST_CASE_P(MSA, AV1SubtractBlockTest,
                         ::testing::Values(aom_subtract_block_msa));
 #endif
 
+#if CONFIG_AV1_HIGHBITDEPTH
 typedef void (*HBDSubtractFunc)(int rows, int cols, int16_t *diff_ptr,
                                 ptrdiff_t diff_stride, const uint8_t *src_ptr,
                                 ptrdiff_t src_stride, const uint8_t *pred_ptr,
                                 ptrdiff_t pred_stride, int bd);
 
-using ::std::tr1::get;
-using ::std::tr1::make_tuple;
-using ::std::tr1::tuple;
+using ::testing::get;
+using ::testing::make_tuple;
+using ::testing::tuple;
 
 // <width, height, bit_dpeth, subtract>
 typedef tuple<int, int, int, HBDSubtractFunc> Params;
 
-#if CONFIG_HIGHBITDEPTH
 class AV1HBDSubtractBlockTest : public ::testing::TestWithParam<Params> {
  public:
   virtual void SetUp() {
@@ -147,8 +144,8 @@ class AV1HBDSubtractBlockTest : public ::testing::TestWithParam<Params> {
   }
 
  protected:
-  void RunForSpeed();
   void CheckResult();
+  void RunForSpeed();
 
  private:
   ACMRandom rnd_;
@@ -161,27 +158,9 @@ class AV1HBDSubtractBlockTest : public ::testing::TestWithParam<Params> {
   int16_t *diff_;
 };
 
-void AV1HBDSubtractBlockTest::RunForSpeed() {
-  const int test_num = 200000;
-  const int max_width = 128;
-  const int max_block_size = max_width * max_width;
-  const int mask = (1 << bit_depth_) - 1;
-  int i, j;
-
-  for (j = 0; j < max_block_size; ++j) {
-    CONVERT_TO_SHORTPTR(src_)[j] = rnd_.Rand16() & mask;
-    CONVERT_TO_SHORTPTR(pred_)[j] = rnd_.Rand16() & mask;
-  }
-
-  for (i = 0; i < test_num; ++i) {
-    func_(block_height_, block_width_, diff_, block_width_, src_, block_width_,
-          pred_, block_width_, bit_depth_);
-  }
-}
-
 void AV1HBDSubtractBlockTest::CheckResult() {
   const int test_num = 100;
-  const int max_width = 128;
+  const size_t max_width = 128;
   const int max_block_size = max_width * max_width;
   const int mask = (1 << bit_depth_) - 1;
   int i, j;
@@ -208,12 +187,27 @@ void AV1HBDSubtractBlockTest::CheckResult() {
 
 TEST_P(AV1HBDSubtractBlockTest, CheckResult) { CheckResult(); }
 
-#if USE_SPEED_TEST
-TEST_P(AV1HBDSubtractBlockTest, CheckSpeed) { RunForSpeed(); }
-#endif  // USE_SPEED_TEST
+void AV1HBDSubtractBlockTest::RunForSpeed() {
+  const int test_num = 200000;
+  const size_t max_width = 128;
+  const int max_block_size = max_width * max_width;
+  const int mask = (1 << bit_depth_) - 1;
+  int i, j;
+
+  for (j = 0; j < max_block_size; ++j) {
+    CONVERT_TO_SHORTPTR(src_)[j] = rnd_.Rand16() & mask;
+    CONVERT_TO_SHORTPTR(pred_)[j] = rnd_.Rand16() & mask;
+  }
+
+  for (i = 0; i < test_num; ++i) {
+    func_(block_height_, block_width_, diff_, block_width_, src_, block_width_,
+          pred_, block_width_, bit_depth_);
+  }
+}
+
+TEST_P(AV1HBDSubtractBlockTest, DISABLED_Speed) { RunForSpeed(); }
 
 #if HAVE_SSE2
-
 const Params kAV1HBDSubtractBlock_sse2[] = {
   make_tuple(4, 4, 12, &aom_highbd_subtract_block_sse2),
   make_tuple(4, 4, 12, &aom_highbd_subtract_block_c),
@@ -252,5 +246,5 @@ const Params kAV1HBDSubtractBlock_sse2[] = {
 INSTANTIATE_TEST_CASE_P(SSE2, AV1HBDSubtractBlockTest,
                         ::testing::ValuesIn(kAV1HBDSubtractBlock_sse2));
 #endif  // HAVE_SSE2
-#endif  // CONFIG_HIGHBITDEPTH
+#endif  // CONFIG_AV1_HIGHBITDEPTH
 }  // namespace

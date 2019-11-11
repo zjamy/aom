@@ -12,13 +12,17 @@
 #include <assert.h>
 #include <emmintrin.h>  // SSE2
 
-#include "./aom_config.h"
-#include "./aom_dsp_rtcd.h"
+#include "config/aom_config.h"
+#include "config/aom_dsp_rtcd.h"
+#include "config/av1_rtcd.h"
+
+#include "aom_dsp/x86/synonyms.h"
 
 #include "aom_ports/mem.h"
 
-#include "./av1_rtcd.h"
 #include "av1/common/filter.h"
+#include "av1/common/onyxc_int.h"
+#include "av1/common/reconinter.h"
 
 typedef uint32_t (*high_variance_fn_t)(const uint16_t *src, int src_stride,
                                        const uint16_t *ref, int ref_stride,
@@ -175,6 +179,9 @@ HIGH_GET_VAR(8);
     return (var >= 0) ? (uint32_t)var : 0;                                 \
   }
 
+VAR_FN(128, 128, 16, 14);
+VAR_FN(128, 64, 16, 13);
+VAR_FN(64, 128, 16, 13);
 VAR_FN(64, 64, 16, 12);
 VAR_FN(64, 32, 16, 11);
 VAR_FN(32, 64, 16, 11);
@@ -185,6 +192,10 @@ VAR_FN(16, 16, 16, 8);
 VAR_FN(16, 8, 8, 7);
 VAR_FN(8, 16, 8, 7);
 VAR_FN(8, 8, 8, 6);
+VAR_FN(8, 32, 8, 8);
+VAR_FN(32, 8, 8, 8);
+VAR_FN(16, 64, 16, 10);
+VAR_FN(64, 16, 16, 10);
 
 #undef VAR_FN
 
@@ -275,30 +286,38 @@ DECLS(sse2);
   uint32_t aom_highbd_8_sub_pixel_variance##w##x##h##_##opt(                   \
       const uint8_t *src8, int src_stride, int x_offset, int y_offset,         \
       const uint8_t *dst8, int dst_stride, uint32_t *sse_ptr) {                \
-    uint32_t sse;                                                              \
     uint16_t *src = CONVERT_TO_SHORTPTR(src8);                                 \
     uint16_t *dst = CONVERT_TO_SHORTPTR(dst8);                                 \
-    int se = aom_highbd_sub_pixel_variance##wf##xh_##opt(                      \
-        src, src_stride, x_offset, y_offset, dst, dst_stride, h, &sse, NULL,   \
-        NULL);                                                                 \
-    if (w > wf) {                                                              \
-      unsigned int sse2;                                                       \
+    int se = 0;                                                                \
+    unsigned int sse = 0;                                                      \
+    unsigned int sse2;                                                         \
+    int row_rep = (w > 64) ? 2 : 1;                                            \
+    for (int wd_64 = 0; wd_64 < row_rep; wd_64++) {                            \
+      src += wd_64 * 64;                                                       \
+      dst += wd_64 * 64;                                                       \
       int se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
-          src + 16, src_stride, x_offset, y_offset, dst + 16, dst_stride, h,   \
-          &sse2, NULL, NULL);                                                  \
+          src, src_stride, x_offset, y_offset, dst, dst_stride, h, &sse2,      \
+          NULL, NULL);                                                         \
       se += se2;                                                               \
       sse += sse2;                                                             \
-      if (w > wf * 2) {                                                        \
+      if (w > wf) {                                                            \
         se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                     \
-            src + 32, src_stride, x_offset, y_offset, dst + 32, dst_stride, h, \
+            src + wf, src_stride, x_offset, y_offset, dst + wf, dst_stride, h, \
             &sse2, NULL, NULL);                                                \
         se += se2;                                                             \
         sse += sse2;                                                           \
-        se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                     \
-            src + 48, src_stride, x_offset, y_offset, dst + 48, dst_stride, h, \
-            &sse2, NULL, NULL);                                                \
-        se += se2;                                                             \
-        sse += sse2;                                                           \
+        if (w > wf * 2) {                                                      \
+          se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
+              src + 2 * wf, src_stride, x_offset, y_offset, dst + 2 * wf,      \
+              dst_stride, h, &sse2, NULL, NULL);                               \
+          se += se2;                                                           \
+          sse += sse2;                                                         \
+          se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
+              src + 3 * wf, src_stride, x_offset, y_offset, dst + 3 * wf,      \
+              dst_stride, h, &sse2, NULL, NULL);                               \
+          se += se2;                                                           \
+          sse += sse2;                                                         \
+        }                                                                      \
       }                                                                        \
     }                                                                          \
     *sse_ptr = sse;                                                            \
@@ -310,33 +329,42 @@ DECLS(sse2);
       const uint8_t *dst8, int dst_stride, uint32_t *sse_ptr) {                \
     int64_t var;                                                               \
     uint32_t sse;                                                              \
+    uint64_t long_sse = 0;                                                     \
     uint16_t *src = CONVERT_TO_SHORTPTR(src8);                                 \
     uint16_t *dst = CONVERT_TO_SHORTPTR(dst8);                                 \
-    int se = aom_highbd_sub_pixel_variance##wf##xh_##opt(                      \
-        src, src_stride, x_offset, y_offset, dst, dst_stride, h, &sse, NULL,   \
-        NULL);                                                                 \
-    if (w > wf) {                                                              \
-      uint32_t sse2;                                                           \
+    int se = 0;                                                                \
+    int row_rep = (w > 64) ? 2 : 1;                                            \
+    for (int wd_64 = 0; wd_64 < row_rep; wd_64++) {                            \
+      src += wd_64 * 64;                                                       \
+      dst += wd_64 * 64;                                                       \
       int se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
-          src + 16, src_stride, x_offset, y_offset, dst + 16, dst_stride, h,   \
-          &sse2, NULL, NULL);                                                  \
+          src, src_stride, x_offset, y_offset, dst, dst_stride, h, &sse, NULL, \
+          NULL);                                                               \
       se += se2;                                                               \
-      sse += sse2;                                                             \
-      if (w > wf * 2) {                                                        \
+      long_sse += sse;                                                         \
+      if (w > wf) {                                                            \
+        uint32_t sse2;                                                         \
         se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                     \
-            src + 32, src_stride, x_offset, y_offset, dst + 32, dst_stride, h, \
+            src + wf, src_stride, x_offset, y_offset, dst + wf, dst_stride, h, \
             &sse2, NULL, NULL);                                                \
         se += se2;                                                             \
-        sse += sse2;                                                           \
-        se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                     \
-            src + 48, src_stride, x_offset, y_offset, dst + 48, dst_stride, h, \
-            &sse2, NULL, NULL);                                                \
-        se += se2;                                                             \
-        sse += sse2;                                                           \
+        long_sse += sse2;                                                      \
+        if (w > wf * 2) {                                                      \
+          se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
+              src + 2 * wf, src_stride, x_offset, y_offset, dst + 2 * wf,      \
+              dst_stride, h, &sse2, NULL, NULL);                               \
+          se += se2;                                                           \
+          long_sse += sse2;                                                    \
+          se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
+              src + 3 * wf, src_stride, x_offset, y_offset, dst + 3 * wf,      \
+              dst_stride, h, &sse2, NULL, NULL);                               \
+          se += se2;                                                           \
+          long_sse += sse2;                                                    \
+        }                                                                      \
       }                                                                        \
     }                                                                          \
     se = ROUND_POWER_OF_TWO(se, 2);                                            \
-    sse = ROUND_POWER_OF_TWO(sse, 4);                                          \
+    sse = (uint32_t)ROUND_POWER_OF_TWO(long_sse, 4);                           \
     *sse_ptr = sse;                                                            \
     var = (int64_t)(sse) - ((cast se * se) >> (wlog2 + hlog2));                \
     return (var >= 0) ? (uint32_t)var : 0;                                     \
@@ -352,35 +380,38 @@ DECLS(sse2);
     uint64_t long_sse = 0;                                                     \
     uint16_t *src = CONVERT_TO_SHORTPTR(src8);                                 \
     uint16_t *dst = CONVERT_TO_SHORTPTR(dst8);                                 \
+    int row_rep = (w > 64) ? 2 : 1;                                            \
     for (start_row = 0; start_row < h; start_row += 16) {                      \
       uint32_t sse2;                                                           \
       int height = h - start_row < 16 ? h - start_row : 16;                    \
-      int se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
-          src + (start_row * src_stride), src_stride, x_offset, y_offset,      \
-          dst + (start_row * dst_stride), dst_stride, height, &sse2, NULL,     \
-          NULL);                                                               \
-      se += se2;                                                               \
-      long_sse += sse2;                                                        \
-      if (w > wf) {                                                            \
-        se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                     \
-            src + 16 + (start_row * src_stride), src_stride, x_offset,         \
-            y_offset, dst + 16 + (start_row * dst_stride), dst_stride, height, \
-            &sse2, NULL, NULL);                                                \
+      uint16_t *src_tmp = src + (start_row * src_stride);                      \
+      uint16_t *dst_tmp = dst + (start_row * dst_stride);                      \
+      for (int wd_64 = 0; wd_64 < row_rep; wd_64++) {                          \
+        src_tmp += wd_64 * 64;                                                 \
+        dst_tmp += wd_64 * 64;                                                 \
+        int se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                 \
+            src_tmp, src_stride, x_offset, y_offset, dst_tmp, dst_stride,      \
+            height, &sse2, NULL, NULL);                                        \
         se += se2;                                                             \
         long_sse += sse2;                                                      \
-        if (w > wf * 2) {                                                      \
+        if (w > wf) {                                                          \
           se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
-              src + 32 + (start_row * src_stride), src_stride, x_offset,       \
-              y_offset, dst + 32 + (start_row * dst_stride), dst_stride,       \
-              height, &sse2, NULL, NULL);                                      \
+              src_tmp + wf, src_stride, x_offset, y_offset, dst_tmp + wf,      \
+              dst_stride, height, &sse2, NULL, NULL);                          \
           se += se2;                                                           \
           long_sse += sse2;                                                    \
-          se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                   \
-              src + 48 + (start_row * src_stride), src_stride, x_offset,       \
-              y_offset, dst + 48 + (start_row * dst_stride), dst_stride,       \
-              height, &sse2, NULL, NULL);                                      \
-          se += se2;                                                           \
-          long_sse += sse2;                                                    \
+          if (w > wf * 2) {                                                    \
+            se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                 \
+                src_tmp + 2 * wf, src_stride, x_offset, y_offset,              \
+                dst_tmp + 2 * wf, dst_stride, height, &sse2, NULL, NULL);      \
+            se += se2;                                                         \
+            long_sse += sse2;                                                  \
+            se2 = aom_highbd_sub_pixel_variance##wf##xh_##opt(                 \
+                src_tmp + 3 * wf, src_stride, x_offset, y_offset,              \
+                dst_tmp + 3 * wf, dst_stride, height, &sse2, NULL, NULL);      \
+            se += se2;                                                         \
+            long_sse += sse2;                                                  \
+          }                                                                    \
         }                                                                      \
       }                                                                        \
     }                                                                          \
@@ -391,18 +422,26 @@ DECLS(sse2);
     return (var >= 0) ? (uint32_t)var : 0;                                     \
   }
 
-#define FNS(opt)                        \
-  FN(64, 64, 16, 6, 6, opt, (int64_t)); \
-  FN(64, 32, 16, 6, 5, opt, (int64_t)); \
-  FN(32, 64, 16, 5, 6, opt, (int64_t)); \
-  FN(32, 32, 16, 5, 5, opt, (int64_t)); \
-  FN(32, 16, 16, 5, 4, opt, (int64_t)); \
-  FN(16, 32, 16, 4, 5, opt, (int64_t)); \
-  FN(16, 16, 16, 4, 4, opt, (int64_t)); \
-  FN(16, 8, 16, 4, 3, opt, (int64_t));  \
-  FN(8, 16, 8, 3, 4, opt, (int64_t));   \
-  FN(8, 8, 8, 3, 3, opt, (int64_t));    \
-  FN(8, 4, 8, 3, 2, opt, (int64_t));
+#define FNS(opt)                          \
+  FN(128, 128, 16, 7, 7, opt, (int64_t)); \
+  FN(128, 64, 16, 7, 6, opt, (int64_t));  \
+  FN(64, 128, 16, 6, 7, opt, (int64_t));  \
+  FN(64, 64, 16, 6, 6, opt, (int64_t));   \
+  FN(64, 32, 16, 6, 5, opt, (int64_t));   \
+  FN(32, 64, 16, 5, 6, opt, (int64_t));   \
+  FN(32, 32, 16, 5, 5, opt, (int64_t));   \
+  FN(32, 16, 16, 5, 4, opt, (int64_t));   \
+  FN(16, 32, 16, 4, 5, opt, (int64_t));   \
+  FN(16, 16, 16, 4, 4, opt, (int64_t));   \
+  FN(16, 8, 16, 4, 3, opt, (int64_t));    \
+  FN(8, 16, 8, 3, 4, opt, (int64_t));     \
+  FN(8, 8, 8, 3, 3, opt, (int64_t));      \
+  FN(8, 4, 8, 3, 2, opt, (int64_t));      \
+  FN(16, 4, 16, 4, 2, opt, (int64_t));    \
+  FN(8, 32, 8, 3, 5, opt, (int64_t));     \
+  FN(32, 8, 16, 5, 3, opt, (int64_t));    \
+  FN(16, 64, 16, 4, 6, opt, (int64_t));   \
+  FN(64, 16, 16, 6, 4, opt, (int64_t))
 
 FNS(sse2);
 
@@ -439,19 +478,19 @@ DECLS(sse2);
     if (w > wf) {                                                              \
       uint32_t sse2;                                                           \
       int se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(               \
-          src + 16, src_stride, x_offset, y_offset, dst + 16, dst_stride,      \
-          sec + 16, w, h, &sse2, NULL, NULL);                                  \
+          src + wf, src_stride, x_offset, y_offset, dst + wf, dst_stride,      \
+          sec + wf, w, h, &sse2, NULL, NULL);                                  \
       se += se2;                                                               \
       sse += sse2;                                                             \
       if (w > wf * 2) {                                                        \
         se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(                 \
-            src + 32, src_stride, x_offset, y_offset, dst + 32, dst_stride,    \
-            sec + 32, w, h, &sse2, NULL, NULL);                                \
+            src + 2 * wf, src_stride, x_offset, y_offset, dst + 2 * wf,        \
+            dst_stride, sec + 2 * wf, w, h, &sse2, NULL, NULL);                \
         se += se2;                                                             \
         sse += sse2;                                                           \
         se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(                 \
-            src + 48, src_stride, x_offset, y_offset, dst + 48, dst_stride,    \
-            sec + 48, w, h, &sse2, NULL, NULL);                                \
+            src + 3 * wf, src_stride, x_offset, y_offset, dst + 3 * wf,        \
+            dst_stride, sec + 3 * wf, w, h, &sse2, NULL, NULL);                \
         se += se2;                                                             \
         sse += sse2;                                                           \
       }                                                                        \
@@ -475,19 +514,19 @@ DECLS(sse2);
     if (w > wf) {                                                              \
       uint32_t sse2;                                                           \
       int se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(               \
-          src + 16, src_stride, x_offset, y_offset, dst + 16, dst_stride,      \
-          sec + 16, w, h, &sse2, NULL, NULL);                                  \
+          src + wf, src_stride, x_offset, y_offset, dst + wf, dst_stride,      \
+          sec + wf, w, h, &sse2, NULL, NULL);                                  \
       se += se2;                                                               \
       sse += sse2;                                                             \
       if (w > wf * 2) {                                                        \
         se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(                 \
-            src + 32, src_stride, x_offset, y_offset, dst + 32, dst_stride,    \
-            sec + 32, w, h, &sse2, NULL, NULL);                                \
+            src + 2 * wf, src_stride, x_offset, y_offset, dst + 2 * wf,        \
+            dst_stride, sec + 2 * wf, w, h, &sse2, NULL, NULL);                \
         se += se2;                                                             \
         sse += sse2;                                                           \
         se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(                 \
-            src + 48, src_stride, x_offset, y_offset, dst + 48, dst_stride,    \
-            sec + 48, w, h, &sse2, NULL, NULL);                                \
+            src + 3 * wf, src_stride, x_offset, y_offset, dst + 3 * wf,        \
+            dst_stride, sec + 3 * wf, w, h, &sse2, NULL, NULL);                \
         se += se2;                                                             \
         sse += sse2;                                                           \
       }                                                                        \
@@ -522,22 +561,22 @@ DECLS(sse2);
       long_sse += sse2;                                                        \
       if (w > wf) {                                                            \
         se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(                 \
-            src + 16 + (start_row * src_stride), src_stride, x_offset,         \
-            y_offset, dst + 16 + (start_row * dst_stride), dst_stride,         \
-            sec + 16 + (start_row * w), w, height, &sse2, NULL, NULL);         \
+            src + wf + (start_row * src_stride), src_stride, x_offset,         \
+            y_offset, dst + wf + (start_row * dst_stride), dst_stride,         \
+            sec + wf + (start_row * w), w, height, &sse2, NULL, NULL);         \
         se += se2;                                                             \
         long_sse += sse2;                                                      \
         if (w > wf * 2) {                                                      \
           se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(               \
-              src + 32 + (start_row * src_stride), src_stride, x_offset,       \
-              y_offset, dst + 32 + (start_row * dst_stride), dst_stride,       \
-              sec + 32 + (start_row * w), w, height, &sse2, NULL, NULL);       \
+              src + 2 * wf + (start_row * src_stride), src_stride, x_offset,   \
+              y_offset, dst + 2 * wf + (start_row * dst_stride), dst_stride,   \
+              sec + 2 * wf + (start_row * w), w, height, &sse2, NULL, NULL);   \
           se += se2;                                                           \
           long_sse += sse2;                                                    \
           se2 = aom_highbd_sub_pixel_avg_variance##wf##xh_##opt(               \
-              src + 48 + (start_row * src_stride), src_stride, x_offset,       \
-              y_offset, dst + 48 + (start_row * dst_stride), dst_stride,       \
-              sec + 48 + (start_row * w), w, height, &sse2, NULL, NULL);       \
+              src + 3 * wf + (start_row * src_stride), src_stride, x_offset,   \
+              y_offset, dst + 3 * wf + (start_row * dst_stride), dst_stride,   \
+              sec + 3 * wf + (start_row * w), w, height, &sse2, NULL, NULL);   \
           se += se2;                                                           \
           long_sse += sse2;                                                    \
         }                                                                      \
@@ -561,19 +600,106 @@ DECLS(sse2);
   FN(16, 8, 16, 4, 3, opt, (int64_t));  \
   FN(8, 16, 8, 3, 4, opt, (int64_t));   \
   FN(8, 8, 8, 3, 3, opt, (int64_t));    \
-  FN(8, 4, 8, 3, 2, opt, (int64_t));
+  FN(8, 4, 8, 3, 2, opt, (int64_t));    \
+  FN(16, 4, 16, 4, 2, opt, (int64_t));  \
+  FN(8, 32, 8, 3, 5, opt, (int64_t));   \
+  FN(32, 8, 16, 5, 3, opt, (int64_t));  \
+  FN(16, 64, 16, 4, 6, opt, (int64_t)); \
+  FN(64, 16, 16, 6, 4, opt, (int64_t));
 
 FNS(sse2);
 
 #undef FNS
 #undef FN
 
-void aom_highbd_upsampled_pred_sse2(uint16_t *comp_pred, int width, int height,
+void aom_highbd_upsampled_pred_sse2(MACROBLOCKD *xd,
+                                    const struct AV1Common *const cm,
+                                    int mi_row, int mi_col, const MV *const mv,
+                                    uint8_t *comp_pred8, int width, int height,
                                     int subpel_x_q3, int subpel_y_q3,
-                                    const uint8_t *ref8, int ref_stride,
-                                    int bd) {
+                                    const uint8_t *ref8, int ref_stride, int bd,
+                                    int subpel_search) {
+  // expect xd == NULL only in tests
+  if (xd != NULL) {
+    const MB_MODE_INFO *mi = xd->mi[0];
+    const int ref_num = 0;
+    const int is_intrabc = is_intrabc_block(mi);
+    const struct scale_factors *const sf =
+        is_intrabc ? &cm->sf_identity : xd->block_ref_scale_factors[ref_num];
+    const int is_scaled = av1_is_scaled(sf);
+
+    if (is_scaled) {
+      // Note: This is mostly a copy from the >=8X8 case in
+      // build_inter_predictors() function, with some small tweaks.
+      // Some assumptions.
+      const int plane = 0;
+
+      // Get pre-requisites.
+      const struct macroblockd_plane *const pd = &xd->plane[plane];
+      const int ssx = pd->subsampling_x;
+      const int ssy = pd->subsampling_y;
+      assert(ssx == 0 && ssy == 0);
+      const struct buf_2d *const dst_buf = &pd->dst;
+      const struct buf_2d *const pre_buf =
+          is_intrabc ? dst_buf : &pd->pre[ref_num];
+      const int mi_x = mi_col * MI_SIZE;
+      const int mi_y = mi_row * MI_SIZE;
+
+      // Calculate subpel_x/y and x/y_step.
+      const int row_start = 0;  // Because ss_y is 0.
+      const int col_start = 0;  // Because ss_x is 0.
+      const int pre_x = (mi_x + MI_SIZE * col_start) >> ssx;
+      const int pre_y = (mi_y + MI_SIZE * row_start) >> ssy;
+      int orig_pos_y = pre_y << SUBPEL_BITS;
+      orig_pos_y += mv->row * (1 << (1 - ssy));
+      int orig_pos_x = pre_x << SUBPEL_BITS;
+      orig_pos_x += mv->col * (1 << (1 - ssx));
+      int pos_y = sf->scale_value_y(orig_pos_y, sf);
+      int pos_x = sf->scale_value_x(orig_pos_x, sf);
+      pos_x += SCALE_EXTRA_OFF;
+      pos_y += SCALE_EXTRA_OFF;
+
+      const int top = -AOM_LEFT_TOP_MARGIN_SCALED(ssy);
+      const int left = -AOM_LEFT_TOP_MARGIN_SCALED(ssx);
+      const int bottom = (pre_buf->height + AOM_INTERP_EXTEND)
+                         << SCALE_SUBPEL_BITS;
+      const int right = (pre_buf->width + AOM_INTERP_EXTEND)
+                        << SCALE_SUBPEL_BITS;
+      pos_y = clamp(pos_y, top, bottom);
+      pos_x = clamp(pos_x, left, right);
+
+      const uint8_t *const pre =
+          pre_buf->buf0 + (pos_y >> SCALE_SUBPEL_BITS) * pre_buf->stride +
+          (pos_x >> SCALE_SUBPEL_BITS);
+
+      InterPredParams inter_pred_params;
+
+      const SubpelParams subpel_params = { sf->x_step_q4, sf->y_step_q4,
+                                           pos_x & SCALE_SUBPEL_MASK,
+                                           pos_y & SCALE_SUBPEL_MASK };
+
+      // Get convolve parameters.
+      inter_pred_params.conv_params = get_conv_params(0, plane, xd->bd);
+      const int_interpfilters filters =
+          av1_broadcast_interp_filter(EIGHTTAP_REGULAR);
+
+      av1_init_inter_params(
+          &inter_pred_params, width, height, mi_y >> pd->subsampling_y,
+          mi_x >> pd->subsampling_x, pd->subsampling_x, pd->subsampling_y,
+          xd->bd, is_cur_buf_hbd(xd), mi->use_intrabc, sf, filters);
+
+      // Get the inter predictor.
+      av1_make_inter_predictor(pre, pre_buf->stride, comp_pred8, width,
+                               &inter_pred_params, &subpel_params);
+      return;
+    }
+  }
+
+  const InterpFilterParams *filter = av1_get_filter(subpel_search);
+  int filter_taps = (subpel_search <= USE_4_TAPS) ? 4 : SUBPEL_TAPS;
   if (!subpel_x_q3 && !subpel_y_q3) {
     uint16_t *ref = CONVERT_TO_SHORTPTR(ref8);
+    uint16_t *comp_pred = CONVERT_TO_SHORTPTR(comp_pred8);
     if (width >= 8) {
       int i;
       assert(!(width & 7));
@@ -601,64 +727,159 @@ void aom_highbd_upsampled_pred_sse2(uint16_t *comp_pred, int width, int height,
         ref += 2 * ref_stride;
       }
     }
+  } else if (!subpel_y_q3) {
+    const int16_t *const kernel =
+        av1_get_interp_filter_subpel_kernel(filter, subpel_x_q3 << 1);
+    aom_highbd_convolve8_horiz(ref8, ref_stride, comp_pred8, width, kernel, 16,
+                               NULL, -1, width, height, bd);
+  } else if (!subpel_x_q3) {
+    const int16_t *const kernel =
+        av1_get_interp_filter_subpel_kernel(filter, subpel_y_q3 << 1);
+    aom_highbd_convolve8_vert(ref8, ref_stride, comp_pred8, width, NULL, -1,
+                              kernel, 16, width, height, bd);
   } else {
-    InterpFilterParams filter;
-    filter = av1_get_interp_filter_params(EIGHTTAP_REGULAR);
-    if (!subpel_y_q3) {
-      const int16_t *kernel;
-      kernel = av1_get_interp_filter_subpel_kernel(filter, subpel_x_q3 << 1);
-      aom_highbd_convolve8_horiz(ref8, ref_stride,
-                                 CONVERT_TO_BYTEPTR(comp_pred), width, kernel,
-                                 16, NULL, -1, width, height, bd);
-    } else if (!subpel_x_q3) {
-      const int16_t *kernel;
-      kernel = av1_get_interp_filter_subpel_kernel(filter, subpel_y_q3 << 1);
-      aom_highbd_convolve8_vert(ref8, ref_stride, CONVERT_TO_BYTEPTR(comp_pred),
-                                width, NULL, -1, kernel, 16, width, height, bd);
-    } else {
-      DECLARE_ALIGNED(16, uint16_t,
-                      temp[((MAX_SB_SIZE * 2 + 16) + 16) * MAX_SB_SIZE]);
-      const uint16_t *ref;
-      const int16_t *kernel_x;
-      const int16_t *kernel_y;
-      int intermediate_height;
-      ref = CONVERT_TO_SHORTPTR(ref8);
-      kernel_x = av1_get_interp_filter_subpel_kernel(filter, subpel_x_q3 << 1);
-      kernel_y = av1_get_interp_filter_subpel_kernel(filter, subpel_y_q3 << 1);
-      intermediate_height =
-          (((height - 1) * 8 + subpel_y_q3) >> 3) + filter.taps;
-      assert(intermediate_height <= (MAX_SB_SIZE * 2 + 16) + 16);
-      aom_highbd_convolve8_horiz(
-          CONVERT_TO_BYTEPTR(ref - ref_stride * ((filter.taps >> 1) - 1)),
-          ref_stride, CONVERT_TO_BYTEPTR(temp), MAX_SB_SIZE, kernel_x, 16, NULL,
-          -1, width, intermediate_height, bd);
-      aom_highbd_convolve8_vert(
-          CONVERT_TO_BYTEPTR(temp + MAX_SB_SIZE * ((filter.taps >> 1) - 1)),
-          MAX_SB_SIZE, CONVERT_TO_BYTEPTR(comp_pred), width, NULL, -1, kernel_y,
-          16, width, height, bd);
+    DECLARE_ALIGNED(16, uint16_t,
+                    temp[((MAX_SB_SIZE + 16) + 16) * MAX_SB_SIZE]);
+    const int16_t *const kernel_x =
+        av1_get_interp_filter_subpel_kernel(filter, subpel_x_q3 << 1);
+    const int16_t *const kernel_y =
+        av1_get_interp_filter_subpel_kernel(filter, subpel_y_q3 << 1);
+    const uint8_t *ref_start = ref8 - ref_stride * ((filter_taps >> 1) - 1);
+    uint16_t *temp_start_horiz = (subpel_search <= USE_4_TAPS)
+                                     ? temp + (filter_taps >> 1) * MAX_SB_SIZE
+                                     : temp;
+    uint16_t *temp_start_vert = temp + MAX_SB_SIZE * ((filter->taps >> 1) - 1);
+    const int intermediate_height =
+        (((height - 1) * 8 + subpel_y_q3) >> 3) + filter_taps;
+    assert(intermediate_height <= (MAX_SB_SIZE * 2 + 16) + 16);
+    aom_highbd_convolve8_horiz(
+        ref_start, ref_stride, CONVERT_TO_BYTEPTR(temp_start_horiz),
+        MAX_SB_SIZE, kernel_x, 16, NULL, -1, width, intermediate_height, bd);
+    aom_highbd_convolve8_vert(CONVERT_TO_BYTEPTR(temp_start_vert), MAX_SB_SIZE,
+                              comp_pred8, width, NULL, -1, kernel_y, 16, width,
+                              height, bd);
+  }
+}
+
+void aom_highbd_comp_avg_upsampled_pred_sse2(
+    MACROBLOCKD *xd, const struct AV1Common *const cm, int mi_row, int mi_col,
+    const MV *const mv, uint8_t *comp_pred8, const uint8_t *pred8, int width,
+    int height, int subpel_x_q3, int subpel_y_q3, const uint8_t *ref8,
+    int ref_stride, int bd, int subpel_search) {
+  aom_highbd_upsampled_pred(xd, cm, mi_row, mi_col, mv, comp_pred8, width,
+                            height, subpel_x_q3, subpel_y_q3, ref8, ref_stride,
+                            bd, subpel_search);
+  uint16_t *pred = CONVERT_TO_SHORTPTR(pred8);
+  uint16_t *comp_pred16 = CONVERT_TO_SHORTPTR(comp_pred8);
+  /*The total number of pixels must be a multiple of 8 (e.g., 4x4).*/
+  assert(!(width * height & 7));
+  int n = width * height >> 3;
+  for (int i = 0; i < n; i++) {
+    __m128i s0 = _mm_loadu_si128((const __m128i *)comp_pred16);
+    __m128i p0 = _mm_loadu_si128((const __m128i *)pred);
+    _mm_storeu_si128((__m128i *)comp_pred16, _mm_avg_epu16(s0, p0));
+    comp_pred16 += 8;
+    pred += 8;
+  }
+}
+
+static INLINE void highbd_compute_dist_wtd_comp_avg(__m128i *p0, __m128i *p1,
+                                                    const __m128i *w0,
+                                                    const __m128i *w1,
+                                                    const __m128i *r,
+                                                    void *const result) {
+  assert(DIST_PRECISION_BITS <= 4);
+  __m128i mult0 = _mm_mullo_epi16(*p0, *w0);
+  __m128i mult1 = _mm_mullo_epi16(*p1, *w1);
+  __m128i sum = _mm_adds_epu16(mult0, mult1);
+  __m128i round = _mm_adds_epu16(sum, *r);
+  __m128i shift = _mm_srli_epi16(round, DIST_PRECISION_BITS);
+
+  xx_storeu_128(result, shift);
+}
+
+void aom_highbd_dist_wtd_comp_avg_pred_sse2(
+    uint8_t *comp_pred8, const uint8_t *pred8, int width, int height,
+    const uint8_t *ref8, int ref_stride,
+    const DIST_WTD_COMP_PARAMS *jcp_param) {
+  int i;
+  const uint16_t wt0 = (uint16_t)jcp_param->fwd_offset;
+  const uint16_t wt1 = (uint16_t)jcp_param->bck_offset;
+  const __m128i w0 = _mm_set_epi16(wt0, wt0, wt0, wt0, wt0, wt0, wt0, wt0);
+  const __m128i w1 = _mm_set_epi16(wt1, wt1, wt1, wt1, wt1, wt1, wt1, wt1);
+  const uint16_t round = ((1 << DIST_PRECISION_BITS) >> 1);
+  const __m128i r =
+      _mm_set_epi16(round, round, round, round, round, round, round, round);
+  uint16_t *pred = CONVERT_TO_SHORTPTR(pred8);
+  uint16_t *ref = CONVERT_TO_SHORTPTR(ref8);
+  uint16_t *comp_pred = CONVERT_TO_SHORTPTR(comp_pred8);
+
+  if (width >= 8) {
+    // Read 8 pixels one row at a time
+    assert(!(width & 7));
+    for (i = 0; i < height; ++i) {
+      int j;
+      for (j = 0; j < width; j += 8) {
+        __m128i p0 = xx_loadu_128(ref);
+        __m128i p1 = xx_loadu_128(pred);
+
+        highbd_compute_dist_wtd_comp_avg(&p0, &p1, &w0, &w1, &r, comp_pred);
+
+        comp_pred += 8;
+        pred += 8;
+        ref += 8;
+      }
+      ref += ref_stride - width;
+    }
+  } else {
+    // Read 4 pixels two rows at a time
+    assert(!(width & 3));
+    for (i = 0; i < height; i += 2) {
+      __m128i p0_0 = xx_loadl_64(ref + 0 * ref_stride);
+      __m128i p0_1 = xx_loadl_64(ref + 1 * ref_stride);
+      __m128i p0 = _mm_unpacklo_epi64(p0_0, p0_1);
+      __m128i p1 = xx_loadu_128(pred);
+
+      highbd_compute_dist_wtd_comp_avg(&p0, &p1, &w0, &w1, &r, comp_pred);
+
+      comp_pred += 8;
+      pred += 8;
+      ref += 2 * ref_stride;
     }
   }
 }
 
-void aom_highbd_comp_avg_upsampled_pred_sse2(uint16_t *comp_pred,
-                                             const uint8_t *pred8, int width,
-                                             int height, int subpel_x_q3,
-                                             int subpel_y_q3,
-                                             const uint8_t *ref8,
-                                             int ref_stride, int bd) {
+void aom_highbd_dist_wtd_comp_avg_upsampled_pred_sse2(
+    MACROBLOCKD *xd, const struct AV1Common *const cm, int mi_row, int mi_col,
+    const MV *const mv, uint8_t *comp_pred8, const uint8_t *pred8, int width,
+    int height, int subpel_x_q3, int subpel_y_q3, const uint8_t *ref8,
+    int ref_stride, int bd, const DIST_WTD_COMP_PARAMS *jcp_param,
+    int subpel_search) {
   uint16_t *pred = CONVERT_TO_SHORTPTR(pred8);
   int n;
   int i;
-  aom_highbd_upsampled_pred(comp_pred, width, height, subpel_x_q3, subpel_y_q3,
-                            ref8, ref_stride, bd);
-  /*The total number of pixels must be a multiple of 8 (e.g., 4x4).*/
+  aom_highbd_upsampled_pred(xd, cm, mi_row, mi_col, mv, comp_pred8, width,
+                            height, subpel_x_q3, subpel_y_q3, ref8, ref_stride,
+                            bd, subpel_search);
   assert(!(width * height & 7));
   n = width * height >> 3;
+
+  const uint16_t wt0 = (uint16_t)jcp_param->fwd_offset;
+  const uint16_t wt1 = (uint16_t)jcp_param->bck_offset;
+  const __m128i w0 = _mm_set_epi16(wt0, wt0, wt0, wt0, wt0, wt0, wt0, wt0);
+  const __m128i w1 = _mm_set_epi16(wt1, wt1, wt1, wt1, wt1, wt1, wt1, wt1);
+  const uint16_t round = ((1 << DIST_PRECISION_BITS) >> 1);
+  const __m128i r =
+      _mm_set_epi16(round, round, round, round, round, round, round, round);
+
+  uint16_t *comp_pred16 = CONVERT_TO_SHORTPTR(comp_pred8);
   for (i = 0; i < n; i++) {
-    __m128i s0 = _mm_loadu_si128((const __m128i *)comp_pred);
-    __m128i p0 = _mm_loadu_si128((const __m128i *)pred);
-    _mm_storeu_si128((__m128i *)comp_pred, _mm_avg_epu16(s0, p0));
-    comp_pred += 8;
+    __m128i p0 = xx_loadu_128(comp_pred16);
+    __m128i p1 = xx_loadu_128(pred);
+
+    highbd_compute_dist_wtd_comp_avg(&p0, &p1, &w0, &w1, &r, comp_pred16);
+
+    comp_pred16 += 8;
     pred += 8;
   }
 }

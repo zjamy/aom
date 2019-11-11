@@ -8,15 +8,16 @@
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
-#ifndef TEST_ENCODE_TEST_DRIVER_H_
-#define TEST_ENCODE_TEST_DRIVER_H_
+#ifndef AOM_TEST_ENCODE_TEST_DRIVER_H_
+#define AOM_TEST_ENCODE_TEST_DRIVER_H_
 
 #include <string>
 #include <vector>
 
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
-#include "./aom_config.h"
+#include "config/aom_config.h"
+
 #if CONFIG_AV1_ENCODER
 #include "aom/aomcx.h"
 #endif
@@ -36,6 +37,9 @@ enum TestMode { kRealTime, kOnePassGood, kTwoPassGood };
   ::testing::Values(::libaom_test::kRealTime, ::libaom_test::kOnePassGood)
 
 #define TWO_PASS_TEST_MODES ::testing::Values(::libaom_test::kTwoPassGood)
+
+#define NONREALTIME_TEST_MODES \
+  ::testing::Values(::libaom_test::kOnePassGood, ::libaom_test::kTwoPassGood)
 
 // Provides an object to handle the libaom get_cx_data() iteration pattern
 class CxDataIterator {
@@ -78,9 +82,9 @@ class TwopassStatsStore {
 // level of abstraction will be fleshed out as more tests are written.
 class Encoder {
  public:
-  Encoder(aom_codec_enc_cfg_t cfg, unsigned long deadline,
-          const unsigned long init_flags, TwopassStatsStore *stats)
-      : cfg_(cfg), deadline_(deadline), init_flags_(init_flags), stats_(stats) {
+  Encoder(aom_codec_enc_cfg_t cfg, const aom_codec_flags_t init_flags,
+          TwopassStatsStore *stats)
+      : cfg_(cfg), init_flags_(init_flags), stats_(stats) {
     memset(&encoder_, 0, sizeof(encoder_));
   }
 
@@ -115,6 +119,21 @@ class Encoder {
     ASSERT_EQ(AOM_CODEC_OK, res) << EncoderError();
   }
 
+  void Control(int ctrl_id, struct aom_svc_layer_id *arg) {
+    const aom_codec_err_t res = aom_codec_control_(&encoder_, ctrl_id, arg);
+    ASSERT_EQ(AOM_CODEC_OK, res) << EncoderError();
+  }
+
+  void Control(int ctrl_id, struct aom_svc_ref_frame_config *arg) {
+    const aom_codec_err_t res = aom_codec_control_(&encoder_, ctrl_id, arg);
+    ASSERT_EQ(AOM_CODEC_OK, res) << EncoderError();
+  }
+
+  void Control(int ctrl_id, struct aom_svc_params *arg) {
+    const aom_codec_err_t res = aom_codec_control_(&encoder_, ctrl_id, arg);
+    ASSERT_EQ(AOM_CODEC_OK, res) << EncoderError();
+  }
+
 #if CONFIG_AV1_ENCODER
   void Control(int ctrl_id, aom_active_map_t *arg) {
     const aom_codec_err_t res = aom_codec_control_(&encoder_, ctrl_id, arg);
@@ -127,8 +146,6 @@ class Encoder {
     ASSERT_EQ(AOM_CODEC_OK, res) << EncoderError();
     cfg_ = *cfg;
   }
-
-  void set_deadline(unsigned long deadline) { deadline_ = deadline; }
 
  protected:
   virtual aom_codec_iface_t *CodecInterface() const = 0;
@@ -147,8 +164,7 @@ class Encoder {
 
   aom_codec_ctx_t encoder_;
   aom_codec_enc_cfg_t cfg_;
-  unsigned long deadline_;
-  unsigned long init_flags_;
+  aom_codec_flags_t init_flags_;
   TwopassStatsStore *stats_;
 };
 
@@ -163,7 +179,7 @@ class EncoderTest {
  protected:
   explicit EncoderTest(const CodecFactory *codec)
       : codec_(codec), abort_(false), init_flags_(0), frame_flags_(0),
-        last_pts_(0), mode_(kRealTime) {
+        last_pts_(0), mode_(kRealTime), number_spatial_layers_(1) {
     // Default to 1 thread.
     cfg_.g_threads = 1;
   }
@@ -173,13 +189,11 @@ class EncoderTest {
   // Initialize the cfg_ member with the default configuration.
   void InitializeConfig();
 
-  // Map the TestMode enum to the deadline_ and passes_ variables.
+  // Map the TestMode enum to the passes_ variables.
   void SetMode(TestMode mode);
 
   // Set encoder flag.
-  void set_init_flags(unsigned long flag) {  // NOLINT(runtime/int)
-    init_flags_ = flag;
-  }
+  void set_init_flags(aom_codec_flags_t flag) { init_flags_ = flag; }
 
   // Main loop
   virtual void RunLoop(VideoSource *video);
@@ -206,9 +220,11 @@ class EncoderTest {
     return !(::testing::Test::HasFatalFailure() || abort_);
   }
 
-  const CodecFactory *codec_;
   // Hook to determine whether to decode frame after encoding
-  virtual bool DoDecode() const { return 1; }
+  virtual bool DoDecode() const { return true; }
+
+  // Hook to determine whether to decode invisible frames after encoding
+  virtual bool DoDecodeInvisible() const { return true; }
 
   // Hook to handle encode/decode mismatch
   virtual void MismatchHook(const aom_image_t *img1, const aom_image_t *img2);
@@ -224,23 +240,26 @@ class EncoderTest {
     return AOM_CODEC_OK == res_dec;
   }
 
+  virtual int GetNumSpatialLayers() { return 1; }
+
   // Hook that can modify the encoder's output data
   virtual const aom_codec_cx_pkt_t *MutateEncoderOutputHook(
       const aom_codec_cx_pkt_t *pkt) {
     return pkt;
   }
 
+  const CodecFactory *codec_;
   bool abort_;
   aom_codec_enc_cfg_t cfg_;
   unsigned int passes_;
-  unsigned long deadline_;
   TwopassStatsStore stats_;
-  unsigned long init_flags_;
+  aom_codec_flags_t init_flags_;
   unsigned long frame_flags_;
   aom_codec_pts_t last_pts_;
   TestMode mode_;
+  int number_spatial_layers_;
 };
 
 }  // namespace libaom_test
 
-#endif  // TEST_ENCODE_TEST_DRIVER_H_
+#endif  // AOM_TEST_ENCODE_TEST_DRIVER_H_

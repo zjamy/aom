@@ -9,11 +9,11 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AOM_PORTS_MEM_H_
-#define AOM_PORTS_MEM_H_
+#ifndef AOM_AOM_PORTS_MEM_H_
+#define AOM_AOM_PORTS_MEM_H_
 
-#include "aom_config.h"
 #include "aom/aom_integer.h"
+#include "config/aom_config.h"
 
 #if (defined(__GNUC__) && __GNUC__) || defined(__SUNPRO_C)
 #define DECLARE_ALIGNED(n, typ, val) typ val __attribute__((aligned(n)))
@@ -54,12 +54,46 @@
   (((value) < 0) ? -ROUND_POWER_OF_TWO_64(-(value), (n)) \
                  : ROUND_POWER_OF_TWO_64((value), (n)))
 
+/* shift right or left depending on sign of n */
+#define RIGHT_SIGNED_SHIFT(value, n) \
+  ((n) < 0 ? ((value) << (-(n))) : ((value) >> (n)))
+
 #define ALIGN_POWER_OF_TWO(value, n) \
   (((value) + ((1 << (n)) - 1)) & ~((1 << (n)) - 1))
 
-#define CONVERT_TO_SHORTPTR(x) ((uint16_t *)(((uintptr_t)(x)) << 1))
-#if CONFIG_HIGHBITDEPTH
-#define CONVERT_TO_BYTEPTR(x) ((uint8_t *)(((uintptr_t)(x)) >> 1))
-#endif  // CONFIG_HIGHBITDEPTH
+#define DIVIDE_AND_ROUND(x, y) (((x) + ((y) >> 1)) / (y))
 
-#endif  // AOM_PORTS_MEM_H_
+#define CONVERT_TO_SHORTPTR(x) ((uint16_t *)(((uintptr_t)(x)) << 1))
+#define CONVERT_TO_BYTEPTR(x) ((uint8_t *)(((uintptr_t)(x)) >> 1))
+
+/*!\brief force enum to be unsigned 1 byte*/
+#define UENUM1BYTE(enumvar) \
+  ;                         \
+  typedef uint8_t enumvar
+
+/*!\brief force enum to be signed 1 byte*/
+#define SENUM1BYTE(enumvar) \
+  ;                         \
+  typedef int8_t enumvar
+
+/*!\brief force enum to be unsigned 2 byte*/
+#define UENUM2BYTE(enumvar) \
+  ;                         \
+  typedef uint16_t enumvar
+
+/*!\brief force enum to be signed 2 byte*/
+#define SENUM2BYTE(enumvar) \
+  ;                         \
+  typedef int16_t enumvar
+
+/*!\brief force enum to be unsigned 4 byte*/
+#define UENUM4BYTE(enumvar) \
+  ;                         \
+  typedef uint32_t enumvar
+
+/*!\brief force enum to be unsigned 4 byte*/
+#define SENUM4BYTE(enumvar) \
+  ;                         \
+  typedef int32_t enumvar
+
+#endif  // AOM_AOM_PORTS_MEM_H_

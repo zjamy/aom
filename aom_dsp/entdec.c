@@ -9,11 +9,9 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifdef HAVE_CONFIG_H
-#include "./config.h"
-#endif
-
+#include <assert.h>
 #include "aom_dsp/entdec.h"
+#include "aom_dsp/prob.h"
 
 /*A range decoder.
   This is an entropy decoder based upon \cite{Mar79}, which is itself a
@@ -75,6 +73,8 @@
   Even relatively modest values like 100 would work fine.*/
 #define OD_EC_LOTS_OF_BITS (0x4000)
 
+/*The return value of od_ec_dec_tell does not change across an od_ec_dec_refill
+   call.*/
 static void od_ec_dec_refill(od_ec_dec *dec) {
   int s;
   od_ec_window dif;
@@ -87,11 +87,25 @@ static void od_ec_dec_refill(od_ec_dec *dec) {
   end = dec->end;
   s = OD_EC_WINDOW_SIZE - 9 - (cnt + 15);
   for (; s >= 0 && bptr < end; s -= 8, bptr++) {
-    OD_ASSERT(s <= OD_EC_WINDOW_SIZE - 8);
+    /*Each time a byte is inserted into the window (dif), bptr advances and cnt
+       is incremented by 8, so the total number of consumed bits (the return
+       value of od_ec_dec_tell) does not change.*/
+    assert(s <= OD_EC_WINDOW_SIZE - 8);
     dif ^= (od_ec_window)bptr[0] << s;
     cnt += 8;
   }
   if (bptr >= end) {
+    /*We've reached the end of the buffer. It is perfectly valid for us to need
+       to fill the window with additional bits past the end of the buffer (and
+       this happens in normal operation). These bits should all just be taken
+       as zero. But we cannot increment bptr past 'end' (this is undefined
+       behavior), so we start to increment dec->tell_offs. We also don't want
+       to keep testing bptr against 'end', so we set cnt to OD_EC_LOTS_OF_BITS
+       and adjust dec->tell_offs so that the total number of unconsumed bits in
+       the window (dec->cnt - dec->tell_offs) does not change. This effectively
+       puts lots of zero bits into the window, and means we won't try to refill
+       it from the buffer for a very long time (at which point we'll put lots
+       of zero bits into the window again).*/
     dec->tell_offs += OD_EC_LOTS_OF_BITS - cnt;
     cnt = OD_EC_LOTS_OF_BITS;
   }
@@ -111,15 +125,13 @@ static void od_ec_dec_refill(od_ec_dec *dec) {
 static int od_ec_dec_normalize(od_ec_dec *dec, od_ec_window dif, unsigned rng,
                                int ret) {
   int d;
-  OD_ASSERT(rng <= 65535U);
+  assert(rng <= 65535U);
+  /*The number of leading zeros in the 16-bit binary representation of rng.*/
   d = 16 - OD_ILOG_NZ(rng);
+  /*d bits in dec->dif are consumed.*/
   dec->cnt -= d;
-#if CONFIG_EC_SMALLMUL
   /*This is equivalent to shifting in 1's instead of 0's.*/
   dec->dif = ((dif + 1) << d) - 1;
-#else
-  dec->dif = dif << d;
-#endif
   dec->rng = rng << d;
   if (dec->cnt < 0) od_ec_dec_refill(dec);
   return ret;
@@ -127,30 +139,21 @@ static int od_ec_dec_normalize(od_ec_dec *dec, od_ec_window dif, unsigned rng,
 
 /*Initializes the decoder.
   buf: The input buffer to use.
-  Return: 0 on success, or a negative value on error.*/
+  storage: The size in bytes of the input buffer.*/
 void od_ec_dec_init(od_ec_dec *dec, const unsigned char *buf,
                     uint32_t storage) {
   dec->buf = buf;
-  dec->eptr = buf + storage;
-  dec->end_window = 0;
-  dec->nend_bits = 0;
   dec->tell_offs = 10 - (OD_EC_WINDOW_SIZE - 8);
   dec->end = buf + storage;
   dec->bptr = buf;
-#if CONFIG_EC_SMALLMUL
   dec->dif = ((od_ec_window)1 << (OD_EC_WINDOW_SIZE - 1)) - 1;
-#else
-  dec->dif = 0;
-#endif
   dec->rng = 0x8000;
   dec->cnt = -15;
-  dec->error = 0;
   od_ec_dec_refill(dec);
 }
 
 /*Decode a single binary value.
-  {EC_SMALLMUL} f: The probability that the bit is one, scaled by 32768.
-  {else} f: The probability that the bit is zero, scaled by 32768.
+  f: The probability that the bit is one, scaled by 32768.
   Return: The value decoded (0 or 1).*/
 int od_ec_decode_bool_q15(od_ec_dec *dec, unsigned f) {
   od_ec_window dif;
@@ -159,14 +162,14 @@ int od_ec_decode_bool_q15(od_ec_dec *dec, unsigned f) {
   unsigned r_new;
   unsigned v;
   int ret;
-  OD_ASSERT(0 < f);
-  OD_ASSERT(f < 32768U);
+  assert(0 < f);
+  assert(f < 32768U);
   dif = dec->dif;
   r = dec->rng;
-  OD_ASSERT(dif >> (OD_EC_WINDOW_SIZE - 16) < r);
-  OD_ASSERT(32768U <= r);
-#if CONFIG_EC_SMALLMUL
-  v = (r >> 8) * (uint32_t)f >> 7;
+  assert(dif >> (OD_EC_WINDOW_SIZE - 16) < r);
+  assert(32768U <= r);
+  v = ((r >> 8) * (uint32_t)(f >> EC_PROB_SHIFT) >> (7 - EC_PROB_SHIFT));
+  v += EC_MIN_PROB;
   vw = (od_ec_window)v << (OD_EC_WINDOW_SIZE - 16);
   ret = 1;
   r_new = v;
@@ -175,30 +178,19 @@ int od_ec_decode_bool_q15(od_ec_dec *dec, unsigned f) {
     dif -= vw;
     ret = 0;
   }
-#else
-  v = f * (uint32_t)r >> 15;
-  vw = (od_ec_window)v << (OD_EC_WINDOW_SIZE - 16);
-  ret = 0;
-  r_new = v;
-  if (dif >= vw) {
-    r_new = r - v;
-    dif -= vw;
-    ret = 1;
-  }
-#endif
   return od_ec_dec_normalize(dec, dif, r_new, ret);
 }
 
-/*Decodes a symbol given a cumulative distribution function (CDF) table in Q15.
-  cdf: The CDF, such that symbol s falls in the range
-        [s > 0 ? cdf[s - 1] : 0, cdf[s]).
-       The values must be monotonically non-increasing, and cdf[nsyms - 1]
-        must be 32768.
-       {EC_SMALLMUL}: The CDF contains 32768 minus those values.
+/*Decodes a symbol given an inverse cumulative distribution function (CDF)
+   table in Q15.
+  icdf: CDF_PROB_TOP minus the CDF, such that symbol s falls in the range
+         [s > 0 ? (CDF_PROB_TOP - icdf[s - 1]) : 0, CDF_PROB_TOP - icdf[s]).
+        The values must be monotonically non-increasing, and icdf[nsyms - 1]
+         must be 0.
   nsyms: The number of symbols in the alphabet.
          This should be at most 16.
   Return: The decoded symbol s.*/
-int od_ec_decode_cdf_q15(od_ec_dec *dec, const uint16_t *cdf, int nsyms) {
+int od_ec_decode_cdf_q15(od_ec_dec *dec, const uint16_t *icdf, int nsyms) {
   od_ec_window dif;
   unsigned r;
   unsigned c;
@@ -208,75 +200,27 @@ int od_ec_decode_cdf_q15(od_ec_dec *dec, const uint16_t *cdf, int nsyms) {
   (void)nsyms;
   dif = dec->dif;
   r = dec->rng;
-  OD_ASSERT(dif >> (OD_EC_WINDOW_SIZE - 16) < r);
-  OD_ASSERT(cdf[nsyms - 1] == OD_ICDF(32768U));
-  OD_ASSERT(32768U <= r);
-#if CONFIG_EC_SMALLMUL
+  const int N = nsyms - 1;
+
+  assert(dif >> (OD_EC_WINDOW_SIZE - 16) < r);
+  assert(icdf[nsyms - 1] == OD_ICDF(CDF_PROB_TOP));
+  assert(32768U <= r);
+  assert(7 - EC_PROB_SHIFT - CDF_SHIFT >= 0);
   c = (unsigned)(dif >> (OD_EC_WINDOW_SIZE - 16));
   v = r;
   ret = -1;
   do {
     u = v;
-    v = (r >> 8) * (uint32_t)cdf[++ret] >> 7;
+    v = ((r >> 8) * (uint32_t)(icdf[++ret] >> EC_PROB_SHIFT) >>
+         (7 - EC_PROB_SHIFT - CDF_SHIFT));
+    v += EC_MIN_PROB * (N - ret);
   } while (c < v);
-  OD_ASSERT(v < u);
-  OD_ASSERT(u <= r);
+  assert(v < u);
+  assert(u <= r);
   r = u - v;
   dif -= (od_ec_window)v << (OD_EC_WINDOW_SIZE - 16);
-#else
-  c = (unsigned)(dif >> (OD_EC_WINDOW_SIZE - 16));
-  v = 0;
-  ret = -1;
-  do {
-    u = v;
-    v = cdf[++ret] * (uint32_t)r >> 15;
-  } while (v <= c);
-  OD_ASSERT(u < v);
-  OD_ASSERT(v <= r);
-  r = v - u;
-  dif -= (od_ec_window)u << (OD_EC_WINDOW_SIZE - 16);
-#endif
   return od_ec_dec_normalize(dec, dif, r, ret);
 }
-
-#if CONFIG_RAWBITS
-/*Extracts a sequence of raw bits from the stream.
-  The bits must have been encoded with od_ec_enc_bits().
-  ftb: The number of bits to extract.
-       This must be between 0 and 25, inclusive.
-  Return: The decoded bits.*/
-uint32_t od_ec_dec_bits_(od_ec_dec *dec, unsigned ftb) {
-  od_ec_window window;
-  int available;
-  uint32_t ret;
-  OD_ASSERT(ftb <= 25);
-  window = dec->end_window;
-  available = dec->nend_bits;
-  if ((unsigned)available < ftb) {
-    const unsigned char *buf;
-    const unsigned char *eptr;
-    buf = dec->buf;
-    eptr = dec->eptr;
-    OD_ASSERT(available <= OD_EC_WINDOW_SIZE - 8);
-    do {
-      if (eptr <= buf) {
-        dec->tell_offs += OD_EC_LOTS_OF_BITS - available;
-        available = OD_EC_LOTS_OF_BITS;
-        break;
-      }
-      window |= (od_ec_window) * --eptr << available;
-      available += 8;
-    } while (available <= OD_EC_WINDOW_SIZE - 8);
-    dec->eptr = eptr;
-  }
-  ret = (uint32_t)window & (((uint32_t)1 << ftb) - 1);
-  window >>= ftb;
-  available -= ftb;
-  dec->end_window = window;
-  dec->nend_bits = available;
-  return ret;
-}
-#endif
 
 /*Returns the number of bits "used" by the decoded symbols so far.
   This same number can be computed in either the encoder or the decoder, and is
@@ -285,8 +229,11 @@ uint32_t od_ec_dec_bits_(od_ec_dec *dec, unsigned ftb) {
           This will always be slightly larger than the exact value (e.g., all
            rounding error is in the positive direction).*/
 int od_ec_dec_tell(const od_ec_dec *dec) {
-  return (int)(((dec->end - dec->eptr) + (dec->bptr - dec->buf)) * 8 -
-               dec->cnt - dec->nend_bits + dec->tell_offs);
+  /*There is a window of bits stored in dec->dif. The difference
+     (dec->bptr - dec->buf) tells us how many bytes have been read into this
+     window. The difference (dec->cnt - dec->tell_offs) tells us how many of
+     the bits in that window remain unconsumed.*/
+  return (int)((dec->bptr - dec->buf) * 8 - dec->cnt + dec->tell_offs);
 }
 
 /*Returns the number of bits "used" by the decoded symbols so far.

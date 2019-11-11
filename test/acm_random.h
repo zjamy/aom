@@ -9,8 +9,8 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef TEST_ACM_RANDOM_H_
-#define TEST_ACM_RANDOM_H_
+#ifndef AOM_TEST_ACM_RANDOM_H_
+#define AOM_TEST_ACM_RANDOM_H_
 
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
@@ -26,6 +26,7 @@ class ACMRandom {
 
   void Reset(int seed) { random_.Reseed(seed); }
 
+  // Generates a random 31-bit unsigned integer from [0, 2^31).
   uint32_t Rand31(void) {
     return random_.Generate(testing::internal::Random::kMaxRange);
   }
@@ -34,6 +35,19 @@ class ACMRandom {
     const uint32_t value =
         random_.Generate(testing::internal::Random::kMaxRange);
     return (value >> 15) & 0xffff;
+  }
+
+  int16_t Rand15Signed(void) {
+    const uint32_t value =
+        random_.Generate(testing::internal::Random::kMaxRange);
+    return (value >> 17) & 0xffff;
+  }
+
+  uint16_t Rand12(void) {
+    const uint32_t value =
+        random_.Generate(testing::internal::Random::kMaxRange);
+    // There's a bit more entropy in the upper bits of this implementation.
+    return (value >> 19) & 0xfff;
   }
 
   int16_t Rand9Signed(void) {
@@ -53,7 +67,7 @@ class ACMRandom {
     // Returns a random value near 0 or near 255, to better exercise
     // saturation behavior.
     const uint8_t r = Rand8();
-    return r < 128 ? r << 4 : r >> 4;
+    return static_cast<uint8_t>((r < 128) ? r << 4 : r >> 4);
   }
 
   int PseudoUniform(int range) { return random_.Generate(range); }
@@ -68,4 +82,4 @@ class ACMRandom {
 
 }  // namespace libaom_test
 
-#endif  // TEST_ACM_RANDOM_H_
+#endif  // AOM_TEST_ACM_RANDOM_H_

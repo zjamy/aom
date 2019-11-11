@@ -7,9 +7,14 @@
  * obtain it at www.aomedia.org/license/software. If the Alliance for Open
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
-*/
+ */
 
 #include <string>
+
+#include "config/aom_version.h"
+
+#include "aom_ports/aom_timer.h"
+#include "common/ivfenc.h"
 #include "test/codec_factory.h"
 #include "test/decode_test_driver.h"
 #include "test/encode_test_driver.h"
@@ -18,25 +23,21 @@
 #include "test/md5_helper.h"
 #include "test/util.h"
 #include "test/webm_video_source.h"
-#include "aom_ports/aom_timer.h"
-#include "./ivfenc.h"
-#include "./aom_version.h"
 
-using std::tr1::make_tuple;
+using ::testing::make_tuple;
 
 namespace {
 
 #define VIDEO_NAME 0
 #define THREADS 1
 
-const int kMaxPsnr = 100;
 const double kUsecsInSec = 1000000.0;
 const char kNewEncodeOutputFile[] = "new_encode.ivf";
 
 /*
  DecodePerfTest takes a tuple of filename + number of threads to decode with
  */
-typedef std::tr1::tuple<const char *, unsigned> DecodePerfParam;
+typedef ::testing::tuple<const char *, unsigned> DecodePerfParam;
 
 // TODO(jimbankoski): Add actual test vectors here when available.
 // const DecodePerfParam kAV1DecodePerfVectors[] = {};
@@ -63,7 +64,7 @@ TEST_P(DecodePerfTest, PerfTest) {
 
   aom_codec_dec_cfg_t cfg = aom_codec_dec_cfg_t();
   cfg.threads = threads;
-  cfg.allow_lowbitdepth = CONFIG_LOWBITDEPTH;
+  cfg.allow_lowbitdepth = 1;
   libaom_test::AV1Decoder decoder(cfg, 0);
 
   aom_usec_timer t;
@@ -121,7 +122,7 @@ class AV1NewEncodeDecodePerfTest
 
   virtual void PreEncodeFrameHook(::libaom_test::VideoSource *video,
                                   ::libaom_test::Encoder *encoder) {
-    if (video->frame() == 1) {
+    if (video->frame() == 0) {
       encoder->Control(AOME_SET_CPUUSED, speed_);
       encoder->Control(AV1E_SET_FRAME_PARALLEL_DECODING, 1);
       encoder->Control(AV1E_SET_TILE_COLUMNS, 2);
@@ -129,7 +130,8 @@ class AV1NewEncodeDecodePerfTest
   }
 
   virtual void BeginPassHook(unsigned int /*pass*/) {
-    const std::string data_path = getenv("LIBAOM_TEST_DATA_PATH");
+    const char *const env = getenv("LIBAOM_TEST_DATA_PATH");
+    const std::string data_path(env ? env : ".");
     const std::string path_to_source = data_path + "/" + kNewEncodeOutputFile;
     outfile_ = fopen(path_to_source.c_str(), "wb");
     ASSERT_TRUE(outfile_ != NULL);
@@ -157,7 +159,7 @@ class AV1NewEncodeDecodePerfTest
               pkt->data.frame.sz);
   }
 
-  virtual bool DoDecode() { return false; }
+  virtual bool DoDecode() const { return false; }
 
   void set_speed(unsigned int speed) { speed_ = speed; }
 
@@ -211,7 +213,7 @@ TEST_P(AV1NewEncodeDecodePerfTest, PerfTest) {
 
   aom_codec_dec_cfg_t cfg = aom_codec_dec_cfg_t();
   cfg.threads = threads;
-  cfg.allow_lowbitdepth = CONFIG_LOWBITDEPTH;
+  cfg.allow_lowbitdepth = 1;
   libaom_test::AV1Decoder decoder(cfg, 0);
 
   aom_usec_timer t;

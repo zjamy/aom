@@ -1,47 +1,40 @@
 /*
- * Copyright (c) 2016, Alliance for Open Media. All rights reserved
+ *  Copyright (c) 2019, Alliance for Open Media. All Rights Reserved.
  *
- * This source code is subject to the terms of the BSD 2 Clause License and
- * the Alliance for Open Media Patent License 1.0. If the BSD 2 Clause License
- * was not distributed with this source code in the LICENSE file, you can
- * obtain it at www.aomedia.org/license/software. If the Alliance for Open
- * Media Patent License 1.0 was not distributed with this source code in the
- * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
-*/
+ *  Use of this source code is governed by a BSD-style license
+ *  that can be found in the LICENSE file in the root of the source
+ *  tree. An additional intellectual property rights grant can be found
+ *  in the file PATENTS.  All contributing project authors may
+ *  be found in the AUTHORS file in the root of the source tree.
+ */
 
-#include <limits.h>
-#include <stdio.h>
-#include <string.h>
+#include <stdlib.h>
 
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
-#include "./aom_config.h"
-#include "./aom_dsp_rtcd.h"
+#include "config/aom_dsp_rtcd.h"
 
 #include "test/acm_random.h"
 #include "test/clear_system_state.h"
 #include "test/register_state_check.h"
 #include "test/util.h"
-#include "aom_mem/aom_mem.h"
+
+namespace {
 
 using libaom_test::ACMRandom;
 
-namespace {
+template <typename Pixel>
 class AverageTestBase : public ::testing::Test {
  public:
-  AverageTestBase(int width, int height) : width_(width), height_(height) {}
+  AverageTestBase(int width, int height)
+      : width_(width), height_(height), source_data_(NULL), source_stride_(0),
+        bit_depth_(8) {}
 
-  static void SetUpTestCase() {
-    source_data_ = reinterpret_cast<uint8_t *>(
-        aom_memalign(kDataAlignment, kDataBlockSize));
-  }
-
-  static void TearDownTestCase() {
+  virtual void TearDown() {
     aom_free(source_data_);
     source_data_ = NULL;
+    libaom_test::ClearSystemState();
   }
-
-  virtual void TearDown() { libaom_test::ClearSystemState(); }
 
  protected:
   // Handle blocks up to 4 blocks 64x64 with stride up to 128
@@ -49,11 +42,32 @@ class AverageTestBase : public ::testing::Test {
   static const int kDataBlockSize = 64 * 128;
 
   virtual void SetUp() {
+    source_data_ = static_cast<Pixel *>(
+        aom_memalign(kDataAlignment, kDataBlockSize * sizeof(source_data_[0])));
+    ASSERT_TRUE(source_data_ != NULL);
     source_stride_ = (width_ + 31) & ~31;
+    bit_depth_ = 8;
     rnd_.Reset(ACMRandom::DeterministicSeed());
   }
 
-  void FillConstant(uint8_t fill_constant) {
+  // Sum Pixels
+  static unsigned int ReferenceAverage8x8(const Pixel *source, int pitch) {
+    unsigned int average = 0;
+    for (int h = 0; h < 8; ++h) {
+      for (int w = 0; w < 8; ++w) average += source[h * pitch + w];
+    }
+    return (average + 32) >> 6;
+  }
+
+  static unsigned int ReferenceAverage4x4(const Pixel *source, int pitch) {
+    unsigned int average = 0;
+    for (int h = 0; h < 4; ++h) {
+      for (int w = 0; w < 4; ++w) average += source[h * pitch + w];
+    }
+    return (average + 8) >> 4;
+  }
+
+  void FillConstant(Pixel fill_constant) {
     for (int i = 0; i < width_ * height_; ++i) {
       source_data_[i] = fill_constant;
     }
@@ -61,23 +75,73 @@ class AverageTestBase : public ::testing::Test {
 
   void FillRandom() {
     for (int i = 0; i < width_ * height_; ++i) {
-      source_data_[i] = rnd_.Rand8();
+      source_data_[i] = rnd_.Rand16() & ((1 << bit_depth_) - 1);
     }
   }
 
   int width_, height_;
-  static uint8_t *source_data_;
+  Pixel *source_data_;
   int source_stride_;
+  int bit_depth_;
 
   ACMRandom rnd_;
 };
+typedef unsigned int (*AverageFunction)(const uint8_t *s, int pitch);
+
+// Arguments: width, height, pitch, block size, avg function.
+typedef std::tuple<int, int, int, int, AverageFunction> AvgFunc;
+
+class AverageTest : public AverageTestBase<uint8_t>,
+                    public ::testing::WithParamInterface<AvgFunc> {
+ public:
+  AverageTest() : AverageTestBase(GET_PARAM(0), GET_PARAM(1)) {}
+
+ protected:
+  void CheckAverages() {
+    const int block_size = GET_PARAM(3);
+    unsigned int expected = 0;
+    if (block_size == 8) {
+      expected =
+          ReferenceAverage8x8(source_data_ + GET_PARAM(2), source_stride_);
+    } else if (block_size == 4) {
+      expected =
+          ReferenceAverage4x4(source_data_ + GET_PARAM(2), source_stride_);
+    }
+
+    unsigned int actual;
+    ASM_REGISTER_STATE_CHECK(
+        actual = GET_PARAM(4)(source_data_ + GET_PARAM(2), source_stride_));
+
+    EXPECT_EQ(expected, actual);
+  }
+};
+
+TEST_P(AverageTest, MinValue) {
+  FillConstant(0);
+  CheckAverages();
+}
+
+TEST_P(AverageTest, MaxValue) {
+  FillConstant(255);
+  CheckAverages();
+}
+
+TEST_P(AverageTest, Random) {
+  // The reference frame, but not the source frame, may be unaligned for
+  // certain types of searches.
+  for (int i = 0; i < 1000; i++) {
+    FillRandom();
+    CheckAverages();
+  }
+}
 
 typedef void (*IntProRowFunc)(int16_t hbuf[16], uint8_t const *ref,
                               const int ref_stride, const int height);
 
-typedef std::tr1::tuple<int, IntProRowFunc, IntProRowFunc> IntProRowParam;
+// Params: height, asm function, c function.
+typedef std::tuple<int, IntProRowFunc, IntProRowFunc> IntProRowParam;
 
-class IntProRowTest : public AverageTestBase,
+class IntProRowTest : public AverageTestBase<uint8_t>,
                       public ::testing::WithParamInterface<IntProRowParam> {
  public:
   IntProRowTest()
@@ -88,13 +152,19 @@ class IntProRowTest : public AverageTestBase,
 
  protected:
   virtual void SetUp() {
-    hbuf_asm_ = reinterpret_cast<int16_t *>(
+    source_data_ = static_cast<uint8_t *>(
+        aom_memalign(kDataAlignment, kDataBlockSize * sizeof(source_data_[0])));
+    ASSERT_TRUE(source_data_ != NULL);
+
+    hbuf_asm_ = static_cast<int16_t *>(
         aom_memalign(kDataAlignment, sizeof(*hbuf_asm_) * 16));
-    hbuf_c_ = reinterpret_cast<int16_t *>(
+    hbuf_c_ = static_cast<int16_t *>(
         aom_memalign(kDataAlignment, sizeof(*hbuf_c_) * 16));
   }
 
   virtual void TearDown() {
+    aom_free(source_data_);
+    source_data_ = NULL;
     aom_free(hbuf_c_);
     hbuf_c_ = NULL;
     aom_free(hbuf_asm_);
@@ -117,9 +187,10 @@ class IntProRowTest : public AverageTestBase,
 
 typedef int16_t (*IntProColFunc)(uint8_t const *ref, const int width);
 
-typedef std::tr1::tuple<int, IntProColFunc, IntProColFunc> IntProColParam;
+// Params: width, asm function, c function.
+typedef std::tuple<int, IntProColFunc, IntProColFunc> IntProColParam;
 
-class IntProColTest : public AverageTestBase,
+class IntProColTest : public AverageTestBase<uint8_t>,
                       public ::testing::WithParamInterface<IntProColParam> {
  public:
   IntProColTest() : AverageTestBase(GET_PARAM(0), 1), sum_asm_(0), sum_c_(0) {
@@ -140,50 +211,6 @@ class IntProColTest : public AverageTestBase,
   int16_t sum_asm_;
   int16_t sum_c_;
 };
-
-typedef int (*SatdFunc)(const int16_t *coeffs, int length);
-typedef std::tr1::tuple<int, SatdFunc> SatdTestParam;
-
-class SatdTest : public ::testing::Test,
-                 public ::testing::WithParamInterface<SatdTestParam> {
- protected:
-  virtual void SetUp() {
-    satd_size_ = GET_PARAM(0);
-    satd_func_ = GET_PARAM(1);
-    rnd_.Reset(ACMRandom::DeterministicSeed());
-    src_ = reinterpret_cast<int16_t *>(
-        aom_memalign(16, sizeof(*src_) * satd_size_));
-    ASSERT_TRUE(src_ != NULL);
-  }
-
-  virtual void TearDown() {
-    libaom_test::ClearSystemState();
-    aom_free(src_);
-  }
-
-  void FillConstant(const int16_t val) {
-    for (int i = 0; i < satd_size_; ++i) src_[i] = val;
-  }
-
-  void FillRandom() {
-    for (int i = 0; i < satd_size_; ++i) src_[i] = rnd_.Rand16();
-  }
-
-  void Check(int expected) {
-    int total;
-    ASM_REGISTER_STATE_CHECK(total = satd_func_(src_, satd_size_));
-    EXPECT_EQ(expected, total);
-  }
-
-  int satd_size_;
-
- private:
-  int16_t *src_;
-  SatdFunc satd_func_;
-  ACMRandom rnd_;
-};
-
-uint8_t *AverageTestBase::source_data_ = NULL;
 
 TEST_P(IntProRowTest, MinValue) {
   FillConstant(0);
@@ -215,85 +242,49 @@ TEST_P(IntProColTest, Random) {
   RunComparison();
 }
 
-TEST_P(SatdTest, MinValue) {
-  const int kMin = -32640;
-  const int expected = -kMin * satd_size_;
-  FillConstant(kMin);
-  Check(expected);
-}
+using std::make_tuple;
 
-TEST_P(SatdTest, MaxValue) {
-  const int kMax = 32640;
-  const int expected = kMax * satd_size_;
-  FillConstant(kMax);
-  Check(expected);
-}
-
-TEST_P(SatdTest, Random) {
-  int expected;
-  switch (satd_size_) {
-    case 16: expected = 205298; break;
-    case 64: expected = 1113950; break;
-    case 256: expected = 4268415; break;
-    case 1024: expected = 16954082; break;
-    default:
-      FAIL() << "Invalid satd size (" << satd_size_
-             << ") valid: 16/64/256/1024";
-  }
-  FillRandom();
-  Check(expected);
-}
-
-using std::tr1::make_tuple;
-
-INSTANTIATE_TEST_CASE_P(C, SatdTest,
-                        ::testing::Values(make_tuple(16, &aom_satd_c),
-                                          make_tuple(64, &aom_satd_c),
-                                          make_tuple(256, &aom_satd_c),
-                                          make_tuple(1024, &aom_satd_c)));
+INSTANTIATE_TEST_CASE_P(
+    C, AverageTest,
+    ::testing::Values(make_tuple(16, 16, 1, 8, &aom_avg_8x8_c),
+                      make_tuple(16, 16, 1, 4, &aom_avg_4x4_c)));
 
 #if HAVE_SSE2
+INSTANTIATE_TEST_CASE_P(
+    SSE2, AverageTest,
+    ::testing::Values(make_tuple(16, 16, 0, 8, &aom_avg_8x8_sse2),
+                      make_tuple(16, 16, 5, 8, &aom_avg_8x8_sse2),
+                      make_tuple(32, 32, 15, 8, &aom_avg_8x8_sse2),
+                      make_tuple(16, 16, 0, 4, &aom_avg_4x4_sse2),
+                      make_tuple(16, 16, 5, 4, &aom_avg_4x4_sse2),
+                      make_tuple(32, 32, 15, 4, &aom_avg_4x4_sse2)));
+
 INSTANTIATE_TEST_CASE_P(
     SSE2, IntProRowTest,
     ::testing::Values(make_tuple(16, &aom_int_pro_row_sse2, &aom_int_pro_row_c),
                       make_tuple(32, &aom_int_pro_row_sse2, &aom_int_pro_row_c),
-                      make_tuple(64, &aom_int_pro_row_sse2,
+                      make_tuple(64, &aom_int_pro_row_sse2, &aom_int_pro_row_c),
+                      make_tuple(128, &aom_int_pro_row_sse2,
                                  &aom_int_pro_row_c)));
 
 INSTANTIATE_TEST_CASE_P(
     SSE2, IntProColTest,
     ::testing::Values(make_tuple(16, &aom_int_pro_col_sse2, &aom_int_pro_col_c),
                       make_tuple(32, &aom_int_pro_col_sse2, &aom_int_pro_col_c),
-                      make_tuple(64, &aom_int_pro_col_sse2,
+                      make_tuple(64, &aom_int_pro_col_sse2, &aom_int_pro_col_c),
+                      make_tuple(128, &aom_int_pro_col_sse2,
                                  &aom_int_pro_col_c)));
-
-INSTANTIATE_TEST_CASE_P(SSE2, SatdTest,
-                        ::testing::Values(make_tuple(16, &aom_satd_sse2),
-                                          make_tuple(64, &aom_satd_sse2),
-                                          make_tuple(256, &aom_satd_sse2),
-                                          make_tuple(1024, &aom_satd_sse2)));
 #endif
 
 #if HAVE_NEON
 INSTANTIATE_TEST_CASE_P(
-    NEON, IntProRowTest,
-    ::testing::Values(make_tuple(16, &aom_int_pro_row_neon, &aom_int_pro_row_c),
-                      make_tuple(32, &aom_int_pro_row_neon, &aom_int_pro_row_c),
-                      make_tuple(64, &aom_int_pro_row_neon,
-                                 &aom_int_pro_row_c)));
-
-INSTANTIATE_TEST_CASE_P(
-    NEON, IntProColTest,
-    ::testing::Values(make_tuple(16, &aom_int_pro_col_neon, &aom_int_pro_col_c),
-                      make_tuple(32, &aom_int_pro_col_neon, &aom_int_pro_col_c),
-                      make_tuple(64, &aom_int_pro_col_neon,
-                                 &aom_int_pro_col_c)));
-
-INSTANTIATE_TEST_CASE_P(NEON, SatdTest,
-                        ::testing::Values(make_tuple(16, &aom_satd_neon),
-                                          make_tuple(64, &aom_satd_neon),
-                                          make_tuple(256, &aom_satd_neon),
-                                          make_tuple(1024, &aom_satd_neon)));
+    NEON, AverageTest,
+    ::testing::Values(make_tuple(16, 16, 0, 8, &aom_avg_8x8_neon),
+                      make_tuple(16, 16, 5, 8, &aom_avg_8x8_neon),
+                      make_tuple(32, 32, 15, 8, &aom_avg_8x8_neon),
+                      make_tuple(16, 16, 0, 4, &aom_avg_4x4_neon),
+                      make_tuple(16, 16, 5, 4, &aom_avg_4x4_neon),
+                      make_tuple(32, 32, 15, 4, &aom_avg_4x4_neon)));
 #endif
 
 }  // namespace

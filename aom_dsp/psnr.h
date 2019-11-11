@@ -9,8 +9,8 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AOM_DSP_PSNR_H_
-#define AOM_DSP_PSNR_H_
+#ifndef AOM_AOM_DSP_PSNR_H_
+#define AOM_AOM_DSP_PSNR_H_
 
 #include "aom_scale/yv12config.h"
 
@@ -27,13 +27,13 @@ typedef struct {
 } PSNR_STATS;
 
 /*!\brief Converts SSE to PSNR
-*
-* Converts sum of squared errros (SSE) to peak signal-to-noise ratio (PNSR).
-*
-* \param[in]    samples       Number of samples
-* \param[in]    peak          Max sample value
-* \param[in]    sse           Sum of squared errors
-*/
+ *
+ * Converts sum of squared errros (SSE) to peak signal-to-noise ratio (PNSR).
+ *
+ * \param[in]    samples       Number of samples
+ * \param[in]    peak          Max sample value
+ * \param[in]    sse           Sum of squared errors
+ */
 double aom_sse_to_psnr(double samples, double peak, double sse);
 int64_t aom_get_y_sse_part(const YV12_BUFFER_CONFIG *a,
                            const YV12_BUFFER_CONFIG *b, int hstart, int width,
@@ -47,7 +47,9 @@ int64_t aom_get_v_sse_part(const YV12_BUFFER_CONFIG *a,
                            const YV12_BUFFER_CONFIG *b, int hstart, int width,
                            int vstart, int height);
 int64_t aom_get_v_sse(const YV12_BUFFER_CONFIG *a, const YV12_BUFFER_CONFIG *b);
-#if CONFIG_HIGHBITDEPTH
+int64_t aom_get_sse_plane(const YV12_BUFFER_CONFIG *a,
+                          const YV12_BUFFER_CONFIG *b, int plane, int highbd);
+#if CONFIG_AV1_HIGHBITDEPTH
 int64_t aom_highbd_get_y_sse_part(const YV12_BUFFER_CONFIG *a,
                                   const YV12_BUFFER_CONFIG *b, int hstart,
                                   int width, int vstart, int height);
@@ -76,4 +78,4 @@ double aom_psnrhvs(const YV12_BUFFER_CONFIG *source,
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-#endif  // AOM_DSP_PSNR_H_
+#endif  // AOM_AOM_DSP_PSNR_H_

@@ -9,12 +9,12 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AV1_COMMON_LOOPFILTER_H_
-#define AV1_COMMON_LOOPFILTER_H_
+#ifndef AOM_AV1_COMMON_AV1_LOOPFILTER_H_
+#define AOM_AV1_COMMON_AV1_LOOPFILTER_H_
+
+#include "config/aom_config.h"
 
 #include "aom_ports/mem.h"
-#include "./aom_config.h"
-
 #include "av1/common/blockd.h"
 #include "av1/common/seg_common.h"
 
@@ -27,31 +27,82 @@ extern "C" {
 
 #define SIMD_WIDTH 16
 
-#define MAX_MODE_LF_DELTAS 2
-
 enum lf_path {
   LF_PATH_420,
   LF_PATH_444,
   LF_PATH_SLOW,
 };
 
+enum { VERT_EDGE = 0, HORZ_EDGE = 1, NUM_EDGE_DIRS } UENUM1BYTE(EDGE_DIR);
+typedef struct {
+  uint64_t bits[4];
+} FilterMask;
+
+#if CONFIG_LPF_MASK
+// This structure holds bit masks for all 4x4 blocks in a 64x64 region.
+// Each 1 bit represents a position in which we want to apply the loop filter.
+// For Y plane, 4x4 in 64x64 requires 16x16 = 256 bit, therefore we use 4
+// uint64_t; For U, V plane, for 420 format, plane size is 32x32, thus we use
+// a uint64_t to represent bitmask.
+// Left_ entries refer to whether we apply a filter on the border to the
+// left of the block.   Above_ entries refer to whether or not to apply a
+// filter on the above border.
+// Since each transform is accompanied by a potentially different type of
+// loop filter there is a different entry in the array for each transform size.
+typedef struct {
+  FilterMask left_y[TX_SIZES];
+  FilterMask above_y[TX_SIZES];
+  FilterMask left_u[TX_SIZES];
+  FilterMask above_u[TX_SIZES];
+  FilterMask left_v[TX_SIZES];
+  FilterMask above_v[TX_SIZES];
+
+  // Y plane vertical edge and horizontal edge filter level
+  uint8_t lfl_y_hor[MI_SIZE_64X64][MI_SIZE_64X64];
+  uint8_t lfl_y_ver[MI_SIZE_64X64][MI_SIZE_64X64];
+
+  // U plane filter level
+  uint8_t lfl_u_ver[MI_SIZE_64X64][MI_SIZE_64X64];
+  uint8_t lfl_u_hor[MI_SIZE_64X64][MI_SIZE_64X64];
+
+  // V plane filter level
+  uint8_t lfl_v_ver[MI_SIZE_64X64][MI_SIZE_64X64];
+  uint8_t lfl_v_hor[MI_SIZE_64X64][MI_SIZE_64X64];
+
+  // other info
+  FilterMask skip;
+  FilterMask is_vert_border;
+  FilterMask is_horz_border;
+  // Y or UV planes, 5 tx sizes: 4x4, 8x8, 16x16, 32x32, 64x64
+  FilterMask tx_size_ver[2][5];
+  FilterMask tx_size_hor[2][5];
+} LoopFilterMask;
+#endif  // CONFIG_LPF_MASK
+
 struct loopfilter {
-  int filter_level;
+  int filter_level[2];
+  int filter_level_u;
+  int filter_level_v;
 
   int sharpness_level;
-  int last_sharpness_level;
 
   uint8_t mode_ref_delta_enabled;
   uint8_t mode_ref_delta_update;
 
-  // 0 = Intra, Last, Last2+Last3(CONFIG_EXT_REFS),
-  // GF, BRF(CONFIG_EXT_REFS), ARF
-  signed char ref_deltas[TOTAL_REFS_PER_FRAME];
-  signed char last_ref_deltas[TOTAL_REFS_PER_FRAME];
+  // 0 = Intra, Last, Last2+Last3,
+  // GF, BRF, ARF2, ARF
+  int8_t ref_deltas[REF_FRAMES];
 
   // 0 = ZERO_MV, MV
-  signed char mode_deltas[MAX_MODE_LF_DELTAS];
-  signed char last_mode_deltas[MAX_MODE_LF_DELTAS];
+  int8_t mode_deltas[MAX_MODE_LF_DELTAS];
+
+  int combine_vert_horz_lf;
+
+#if CONFIG_LPF_MASK
+  LoopFilterMask *lfm;
+  size_t lfm_num;
+  int lfm_stride;
+#endif  // CONFIG_LPF_MASK
 };
 
 // Need to align this structure so when it is declared and
@@ -64,99 +115,94 @@ typedef struct {
 
 typedef struct {
   loop_filter_thresh lfthr[MAX_LOOP_FILTER + 1];
-  uint8_t lvl[MAX_SEGMENTS][TOTAL_REFS_PER_FRAME][MAX_MODE_LF_DELTAS];
+  uint8_t lvl[MAX_MB_PLANE][MAX_SEGMENTS][2][REF_FRAMES][MAX_MODE_LF_DELTAS];
 } loop_filter_info_n;
-
-// This structure holds bit masks for all 8x8 blocks in a 64x64 region.
-// Each 1 bit represents a position in which we want to apply the loop filter.
-// Left_ entries refer to whether we apply a filter on the border to the
-// left of the block.   Above_ entries refer to whether or not to apply a
-// filter on the above border.   Int_ entries refer to whether or not to
-// apply borders on the 4x4 edges within the 8x8 block that each bit
-// represents.
-// Since each transform is accompanied by a potentially different type of
-// loop filter there is a different entry in the array for each transform size.
-typedef struct {
-  uint64_t left_y[TX_SIZES];
-  uint64_t above_y[TX_SIZES];
-  uint64_t int_4x4_y;
-  uint16_t left_uv[TX_SIZES];
-  uint16_t above_uv[TX_SIZES];
-  uint16_t left_int_4x4_uv;
-  uint16_t above_int_4x4_uv;
-  uint8_t lfl_y[MAX_MIB_SIZE][MAX_MIB_SIZE];
-  uint8_t lfl_uv[MAX_MIB_SIZE / 2][MAX_MIB_SIZE / 2];
-} LOOP_FILTER_MASK;
 
 /* assorted loopfilter functions which get used elsewhere */
 struct AV1Common;
 struct macroblockd;
 struct AV1LfSyncData;
 
-// This function sets up the bit masks for the entire 64x64 region represented
-// by mi_row, mi_col.
-void av1_setup_mask(struct AV1Common *const cm, const int mi_row,
-                    const int mi_col, MODE_INFO **mi_8x8,
-                    const int mode_info_stride, LOOP_FILTER_MASK *lfm);
-
-void av1_filter_block_plane_ss00_ver(struct AV1Common *const cm,
-                                     struct macroblockd_plane *const plane,
-                                     int mi_row, LOOP_FILTER_MASK *lfm);
-void av1_filter_block_plane_ss00_hor(struct AV1Common *const cm,
-                                     struct macroblockd_plane *const plane,
-                                     int mi_row, LOOP_FILTER_MASK *lfm);
-void av1_filter_block_plane_ss11_ver(struct AV1Common *const cm,
-                                     struct macroblockd_plane *const plane,
-                                     int mi_row, LOOP_FILTER_MASK *lfm);
-void av1_filter_block_plane_ss11_hor(struct AV1Common *const cm,
-                                     struct macroblockd_plane *const plane,
-                                     int mi_row, LOOP_FILTER_MASK *lfm);
-
-void av1_filter_block_plane_non420_ver(struct AV1Common *const cm,
-                                       struct macroblockd_plane *plane,
-                                       MODE_INFO **mi_8x8, int mi_row,
-                                       int mi_col, int pl);
-void av1_filter_block_plane_non420_hor(struct AV1Common *const cm,
-                                       struct macroblockd_plane *plane,
-                                       MODE_INFO **mi_8x8, int mi_row,
-                                       int mi_col, int pl);
-
 void av1_loop_filter_init(struct AV1Common *cm);
 
-// Update the loop filter for the current frame.
-// This should be called before av1_loop_filter_rows(),
-// av1_loop_filter_frame()
-// calls this function directly.
-void av1_loop_filter_frame_init(struct AV1Common *cm, int default_filt_lvl);
+void av1_loop_filter_frame_init(struct AV1Common *cm, int plane_start,
+                                int plane_end);
 
+#if CONFIG_LPF_MASK
 void av1_loop_filter_frame(YV12_BUFFER_CONFIG *frame, struct AV1Common *cm,
-                           struct macroblockd *mbd, int filter_level,
-                           int y_only, int partial_frame);
+                           struct macroblockd *xd, int is_decoding,
+                           int plane_start, int plane_end, int partial_frame);
+#else
+void av1_loop_filter_frame(YV12_BUFFER_CONFIG *frame, struct AV1Common *cm,
+                           struct macroblockd *xd, int plane_start,
+                           int plane_end, int partial_frame);
+#endif
 
-// Apply the loop filter to [start, stop) macro block rows in frame_buffer.
-void av1_loop_filter_rows(YV12_BUFFER_CONFIG *frame_buffer,
-                          struct AV1Common *cm,
-                          struct macroblockd_plane planes[MAX_MB_PLANE],
-                          int start, int stop, int y_only);
+void av1_filter_block_plane_vert(const struct AV1Common *const cm,
+                                 const MACROBLOCKD *const xd, const int plane,
+                                 const MACROBLOCKD_PLANE *const plane_ptr,
+                                 const uint32_t mi_row, const uint32_t mi_col);
+
+void av1_filter_block_plane_horz(const struct AV1Common *const cm,
+                                 const MACROBLOCKD *const xd, const int plane,
+                                 const MACROBLOCKD_PLANE *const plane_ptr,
+                                 const uint32_t mi_row, const uint32_t mi_col);
 
 typedef struct LoopFilterWorkerData {
   YV12_BUFFER_CONFIG *frame_buffer;
   struct AV1Common *cm;
   struct macroblockd_plane planes[MAX_MB_PLANE];
-
-  int start;
-  int stop;
-  int y_only;
+  // TODO(Ranjit): When the filter functions are modified to use xd->lossless
+  // add lossless as a member here.
+  MACROBLOCKD *xd;
 } LFWorkerData;
 
-void av1_loop_filter_data_reset(
-    LFWorkerData *lf_data, YV12_BUFFER_CONFIG *frame_buffer,
-    struct AV1Common *cm, const struct macroblockd_plane planes[MAX_MB_PLANE]);
+uint8_t av1_get_filter_level(const struct AV1Common *cm,
+                             const loop_filter_info_n *lfi_n, const int dir_idx,
+                             int plane, const MB_MODE_INFO *mbmi);
+#if CONFIG_LPF_MASK
+void av1_filter_block_plane_ver(struct AV1Common *const cm,
+                                struct macroblockd_plane *const plane_ptr,
+                                int pl, int mi_row, int mi_col);
 
-// Operates on the rows described by 'lf_data'.
-int av1_loop_filter_worker(LFWorkerData *const lf_data, void *unused);
+void av1_filter_block_plane_hor(struct AV1Common *const cm,
+                                struct macroblockd_plane *const plane, int pl,
+                                int mi_row, int mi_col);
+
+int get_index_shift(int mi_col, int mi_row, int *index);
+
+void av1_build_bitmask_vert_info(
+    struct AV1Common *const cm, const struct macroblockd_plane *const plane_ptr,
+    int plane);
+
+void av1_build_bitmask_horz_info(
+    struct AV1Common *const cm, const struct macroblockd_plane *const plane_ptr,
+    int plane);
+
+void av1_filter_block_plane_bitmask_vert(
+    struct AV1Common *const cm, struct macroblockd_plane *const plane_ptr,
+    int pl, int mi_row, int mi_col);
+
+void av1_filter_block_plane_bitmask_horz(
+    struct AV1Common *const cm, struct macroblockd_plane *const plane_ptr,
+    int pl, int mi_row, int mi_col);
+
+void av1_store_bitmask_univariant_tx(struct AV1Common *cm, int mi_row,
+                                     int mi_col, BLOCK_SIZE bsize,
+                                     MB_MODE_INFO *mbmi);
+
+void av1_store_bitmask_other_info(struct AV1Common *cm, int mi_row, int mi_col,
+                                  BLOCK_SIZE bsize, MB_MODE_INFO *mbmi,
+                                  int is_horz_coding_block_border,
+                                  int is_vert_coding_block_border);
+
+void av1_store_bitmask_vartx(struct AV1Common *cm, int mi_row, int mi_col,
+                             BLOCK_SIZE bsize, TX_SIZE tx_size,
+                             MB_MODE_INFO *mbmi);
+#endif  // CONFIG_LPF_MASK
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // AV1_COMMON_LOOPFILTER_H_
+#endif  // AOM_AV1_COMMON_AV1_LOOPFILTER_H_

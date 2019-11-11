@@ -9,7 +9,8 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#include "./av1_rtcd.h"
+#include "config/av1_rtcd.h"
+
 #include "aom_dsp/mips/macros_msa.h"
 
 static void temporal_filter_apply_8size_msa(uint8_t *frm1_ptr, uint32_t stride,
@@ -266,6 +267,7 @@ static void temporal_filter_apply_16size_msa(uint8_t *frm1_ptr, uint32_t stride,
   }
 }
 
+// TODO(yunqing) The following optimization is not used since c code changes.
 void av1_temporal_filter_apply_msa(uint8_t *frame1_ptr, uint32_t stride,
                                    uint8_t *frame2_ptr, uint32_t blk_w,
                                    uint32_t blk_h, int32_t strength,

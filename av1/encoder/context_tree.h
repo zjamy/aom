@@ -9,8 +9,10 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AV1_ENCODER_CONTEXT_TREE_H_
-#define AV1_ENCODER_CONTEXT_TREE_H_
+#ifndef AOM_AV1_ENCODER_CONTEXT_TREE_H_
+#define AOM_AV1_ENCODER_CONTEXT_TREE_H_
+
+#include "config/aom_config.h"
 
 #include "av1/common/blockd.h"
 #include "av1/encoder/block.h"
@@ -25,85 +27,70 @@ struct ThreadData;
 
 // Structure to hold snapshot of coding context during the mode picking process
 typedef struct {
-  MODE_INFO mic;
+  MB_MODE_INFO mic;
   MB_MODE_INFO_EXT mbmi_ext;
-#if CONFIG_PALETTE
   uint8_t *color_index_map[2];
-#endif  // CONFIG_PALETTE
-#if CONFIG_VAR_TX
-  uint8_t *blk_skip[MAX_MB_PLANE];
-#endif
+  uint8_t *blk_skip;
 
   tran_low_t *coeff[MAX_MB_PLANE];
   tran_low_t *qcoeff[MAX_MB_PLANE];
   tran_low_t *dqcoeff[MAX_MB_PLANE];
-#if CONFIG_PVQ
-  tran_low_t *pvq_ref_coeff[MAX_MB_PLANE];
-#endif
   uint16_t *eobs[MAX_MB_PLANE];
-#if CONFIG_LV_MAP
   uint8_t *txb_entropy_ctx[MAX_MB_PLANE];
-#endif
+  uint8_t *tx_type_map;
 
   int num_4x4_blk;
-  int skip;
   // For current partition, only if all Y, U, and V transform blocks'
   // coefficients are quantized to 0, skippable is set to 1.
   int skippable;
-  int best_mode_index;
+#if CONFIG_INTERNAL_STATS
+  THR_MODES best_mode_index;
+#endif  // CONFIG_INTERNAL_STATS
   int hybrid_pred_diff;
   int comp_pred_diff;
   int single_pred_diff;
 
-  // TODO(jingning) Use RD_COST struct here instead. This involves a boarder
-  // scope of refactoring.
-  int rate;
-  int64_t dist;
+  RD_STATS rd_stats;
+
+  int rd_mode_is_ready;  // Flag to indicate whether rd pick mode decision has
+                         // been made.
 
   // motion vector cache for adaptive motion search control in partition
   // search loop
-  MV pred_mv[TOTAL_REFS_PER_FRAME];
-  InterpFilter pred_interp_filter;
-#if CONFIG_EXT_PARTITION_TYPES
+  MV pred_mv[REF_FRAMES];
   PARTITION_TYPE partition;
-#endif
 } PICK_MODE_CONTEXT;
 
 typedef struct PC_TREE {
-  int index;
   PARTITION_TYPE partitioning;
   BLOCK_SIZE block_size;
   PICK_MODE_CONTEXT none;
   PICK_MODE_CONTEXT horizontal[2];
   PICK_MODE_CONTEXT vertical[2];
-#if CONFIG_EXT_PARTITION_TYPES
   PICK_MODE_CONTEXT horizontala[3];
   PICK_MODE_CONTEXT horizontalb[3];
   PICK_MODE_CONTEXT verticala[3];
   PICK_MODE_CONTEXT verticalb[3];
-#endif
-  union {
-    struct PC_TREE *split[4];
-    PICK_MODE_CONTEXT *leaf_split[4];
-  };
-#if CONFIG_SUPERTX
-  PICK_MODE_CONTEXT horizontal_supertx;
-  PICK_MODE_CONTEXT vertical_supertx;
-  PICK_MODE_CONTEXT split_supertx;
-#if CONFIG_EXT_PARTITION_TYPES
-  PICK_MODE_CONTEXT horizontala_supertx;
-  PICK_MODE_CONTEXT horizontalb_supertx;
-  PICK_MODE_CONTEXT verticala_supertx;
-  PICK_MODE_CONTEXT verticalb_supertx;
-#endif
-#endif
+  PICK_MODE_CONTEXT horizontal4[4];
+  PICK_MODE_CONTEXT vertical4[4];
+  struct PC_TREE *split[4];
+  int index;
+
+  // Simple motion search_features
+  MV mv_ref_fulls[REF_FRAMES];
+  unsigned int sms_none_feat[2];
+  unsigned int sms_rect_feat[8];
+  int sms_none_valid;
+  int sms_rect_valid;
 } PC_TREE;
 
 void av1_setup_pc_tree(struct AV1Common *cm, struct ThreadData *td);
-void av1_free_pc_tree(struct ThreadData *td);
+void av1_free_pc_tree(struct ThreadData *td, const int num_planes);
+void av1_copy_tree_context(PICK_MODE_CONTEXT *dst_ctx,
+                           PICK_MODE_CONTEXT *src_ctx);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif /* AV1_ENCODER_CONTEXT_TREE_H_ */
+#endif  // AOM_AV1_ENCODER_CONTEXT_TREE_H_

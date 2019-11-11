@@ -158,7 +158,8 @@ HIGH_SAD64XN 64 ; highbd_sad64x64_sse2
 HIGH_SAD64XN 32 ; highbd_sad64x32_sse2
 HIGH_SAD64XN 64, 1 ; highbd_sad64x64_avg_sse2
 HIGH_SAD64XN 32, 1 ; highbd_sad64x32_avg_sse2
-
+HIGH_SAD64XN 16 ; highbd_sad_64x16_sse2
+HIGH_SAD64XN 16, 1 ; highbd_sad_64x16_avg_sse2
 
 ; unsigned int aom_highbd_sad32x{16,32,64}_sse2(uint8_t *src, int src_stride,
 ;                                    uint8_t *ref, int ref_stride);
@@ -227,6 +228,8 @@ HIGH_SAD32XN 16 ; highbd_sad32x16_sse2
 HIGH_SAD32XN 64, 1 ; highbd_sad32x64_avg_sse2
 HIGH_SAD32XN 32, 1 ; highbd_sad32x32_avg_sse2
 HIGH_SAD32XN 16, 1 ; highbd_sad32x16_avg_sse2
+HIGH_SAD32XN 8 ; highbd_sad_32x8_sse2
+HIGH_SAD32XN 8, 1 ; highbd_sad_32x8_avg_sse2
 
 ; unsigned int aom_highbd_sad16x{8,16,32}_sse2(uint8_t *src, int src_stride,
 ;                                    uint8_t *ref, int ref_stride);
@@ -295,7 +298,10 @@ HIGH_SAD16XN  8 ; highbd_sad16x8_sse2
 HIGH_SAD16XN 32, 1 ; highbd_sad16x32_avg_sse2
 HIGH_SAD16XN 16, 1 ; highbd_sad16x16_avg_sse2
 HIGH_SAD16XN  8, 1 ; highbd_sad16x8_avg_sse2
-
+HIGH_SAD16XN 4 ; highbd_sad_16x4_sse2
+HIGH_SAD16XN 4, 1 ; highbd_sad_16x4_avg_sse2
+HIGH_SAD16XN 64 ; highbd_sad_16x64_sse2
+HIGH_SAD16XN 64, 1 ; highbd_sad_16x64_avg_sse2
 
 ; unsigned int aom_highbd_sad8x{4,8,16}_sse2(uint8_t *src, int src_stride,
 ;                                    uint8_t *ref, int ref_stride);
@@ -364,3 +370,73 @@ HIGH_SAD8XN  4 ; highbd_sad8x4_sse2
 HIGH_SAD8XN 16, 1 ; highbd_sad8x16_avg_sse2
 HIGH_SAD8XN  8, 1 ; highbd_sad8x8_avg_sse2
 HIGH_SAD8XN  4, 1 ; highbd_sad8x4_avg_sse2
+HIGH_SAD8XN 32 ; highbd_sad_8x32_sse2
+HIGH_SAD8XN 32, 1 ; highbd_sad_8x32_avg_sse2
+
+; unsigned int aom_highbd_sad4x{4,8,16}_sse2(uint8_t *src, int src_stride,
+;                                    uint8_t *ref, int ref_stride);
+%macro HIGH_SAD4XN 1-2 0
+  HIGH_SAD_FN 4, %1, 7, %2
+  mov              n_rowsd, %1/4
+  pxor                  m0, m0
+  pxor                  m6, m6
+
+.loop:
+  movq                  m1, [refq]
+  movq                  m2, [refq+ref_strideq*2]
+  movq                  m3, [refq+ref_strideq*4]
+  movq                  m4, [refq+ref_stride3q*2]
+  punpcklwd             m1, m3
+  punpcklwd             m2, m4
+%if %2 == 1
+  movq                  m3, [second_predq+8*0]
+  movq                  m5, [second_predq+8*2]
+  punpcklwd             m3, m5
+  movq                  m4, [second_predq+8*1]
+  movq                  m5, [second_predq+8*3]
+  punpcklwd             m4, m5
+  lea         second_predq, [second_predq+8*4]
+  pavgw                 m1, m3
+  pavgw                 m2, m4
+%endif
+  movq                  m5, [srcq]
+  movq                  m3, [srcq+src_strideq*4]
+  punpcklwd             m5, m3
+  movdqa                m3, m1
+  psubusw               m1, m5
+  psubusw               m5, m3
+  por                   m1, m5
+  movq                  m5, [srcq+src_strideq*2]
+  movq                  m4, [srcq+src_stride3q*2]
+  punpcklwd             m5, m4
+  movdqa                m4, m2
+  psubusw               m2, m5
+  psubusw               m5, m4
+  por                   m2, m5
+  paddw                 m1, m2
+  movdqa                m2, m1
+  punpcklwd             m1, m6
+  punpckhwd             m2, m6
+  lea                 refq, [refq+ref_strideq*8]
+  paddd                 m0, m1
+  lea                 srcq, [srcq+src_strideq*8]
+  paddd                 m0, m2
+  dec              n_rowsd
+  jg .loop
+
+  movhlps               m1, m0
+  paddd                 m0, m1
+  punpckldq             m0, m6
+  movhlps               m1, m0
+  paddd                 m0, m1
+  movd                 eax, m0
+  RET
+%endmacro
+
+INIT_XMM sse2
+HIGH_SAD4XN 16 ; highbd_sad4x16_sse2
+HIGH_SAD4XN  8 ; highbd_sad4x8_sse2
+HIGH_SAD4XN  4 ; highbd_sad4x4_sse2
+HIGH_SAD4XN 16, 1 ; highbd_sad4x16_avg_sse2
+HIGH_SAD4XN  8, 1 ; highbd_sad4x8_avg_sse2
+HIGH_SAD4XN  4, 1 ; highbd_sad4x4_avg_sse2

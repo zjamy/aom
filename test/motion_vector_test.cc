@@ -7,7 +7,9 @@
  * obtain it at www.aomedia.org/license/software. If the Alliance for Open
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
-*/
+ */
+
+#include <memory>
 
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
@@ -22,7 +24,8 @@ namespace {
 
 // Encoding modes
 const libaom_test::TestMode kEncodingModeVectors[] = {
-  ::libaom_test::kTwoPassGood, ::libaom_test::kOnePassGood,
+  ::libaom_test::kTwoPassGood,
+  ::libaom_test::kOnePassGood,
 };
 
 // Encoding speeds
@@ -59,7 +62,7 @@ class MotionVectorTestLarge
 
   virtual void PreEncodeFrameHook(::libaom_test::VideoSource *video,
                                   ::libaom_test::Encoder *encoder) {
-    if (video->frame() == 1) {
+    if (video->frame() == 0) {
       encoder->Control(AOME_SET_CPUUSED, cpu_used_);
       encoder->Control(AV1E_ENABLE_MOTION_VECTOR_UNIT_TEST, mv_test_mode_);
       if (encoding_mode_ != ::libaom_test::kRealTime) {
@@ -82,14 +85,14 @@ TEST_P(MotionVectorTestLarge, OverallTest) {
   // Reduce the test clip's resolution while testing on 32-bit system.
   if (sizeof(void *) == 4) {
     width = 2048;
-    height = 1080;
+    height = 360;
   }
 
   cfg_.rc_target_bitrate = 24000;
   cfg_.g_profile = 0;
   init_flags_ = AOM_CODEC_USE_PSNR;
 
-  testing::internal::scoped_ptr<libaom_test::VideoSource> video;
+  std::unique_ptr<libaom_test::VideoSource> video;
   video.reset(new libaom_test::YUVVideoSource(
       "niklas_640_480_30.yuv", AOM_IMG_FMT_I420, width, height, 30, 1, 0, 3));
 

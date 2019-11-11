@@ -9,10 +9,11 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AOM_DSP_TXFM_COMMON_H_
-#define AOM_DSP_TXFM_COMMON_H_
+#ifndef AOM_AOM_DSP_TXFM_COMMON_H_
+#define AOM_AOM_DSP_TXFM_COMMON_H_
 
 #include "aom_dsp/aom_dsp_common.h"
+#include "av1/common/enums.h"
 
 // Constants and Macros used by all idct/dct functions
 #define DCT_CONST_BITS 14
@@ -21,10 +22,24 @@
 #define UNIT_QUANT_SHIFT 2
 #define UNIT_QUANT_FACTOR (1 << UNIT_QUANT_SHIFT)
 
+typedef struct txfm_param {
+  // for both forward and inverse transforms
+  TX_TYPE tx_type;
+  TX_SIZE tx_size;
+  int lossless;
+  int bd;
+  // are the pixel buffers octets or shorts?  This should collapse to
+  // bd==8 implies !is_hbd, but that's not certain right now.
+  int is_hbd;
+  TxSetType tx_set_type;
+  // for inverse transforms only
+  int eob;
+} TxfmParam;
+
 // Constants:
 //  for (int i = 1; i< 32; ++i)
 //    printf("static const int cospi_%d_64 = %.0f;\n", i,
-//           round(16384 * cos(i*M_PI/64)));
+//           round(16384 * cos(i*PI/64)));
 // Note: sin(k*Pi/64) = cos((32-k)*Pi/64)
 static const tran_high_t cospi_1_64 = 16364;
 static const tran_high_t cospi_2_64 = 16305;
@@ -66,37 +81,11 @@ static const tran_high_t sinpi_4_9 = 15212;
 
 // 16384 * sqrt(2)
 static const tran_high_t Sqrt2 = 23170;
+static const tran_high_t InvSqrt2 = 11585;
 
 static INLINE tran_high_t fdct_round_shift(tran_high_t input) {
   tran_high_t rv = ROUND_POWER_OF_TWO(input, DCT_CONST_BITS);
   return rv;
 }
 
-#if CONFIG_LGT
-// LGT4--a modified ADST4
-// LGT4 name: lgt4_160
-// Self loops: 1.600, 0.000, 0.000, 0.000
-// Edges: 1.000, 1.000, 1.000
-static const tran_high_t lgtbasis4[4][4] = {
-  { 3809, 9358, 13567, 15834 },
-  { 10673, 15348, 2189, -13513 },
-  { 15057, -157, -14961, 9290 },
-  { 13481, -14619, 11144, -4151 },
-};
-
-// LGT8--a modified ADST8
-// LGT8 name: lgt8_170
-// Self loops: 1.700, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000
-// Edges: 1.000, 1.000, 1.000, 1.000, 1.000, 1.000, 1.000
-static const tran_high_t lgtbasis8[8][8] = {
-  { 1858, 4947, 7850, 10458, 12672, 14411, 15607, 16217 },
-  { 5494, 13022, 16256, 14129, 7343, -1864, -10456, -15601 },
-  { 8887, 16266, 9500, -5529, -15749, -12273, 1876, 14394 },
-  { 11870, 13351, -6199, -15984, -590, 15733, 7273, -12644 },
-  { 14248, 5137, -15991, 291, 15893, -5685, -13963, 10425 },
-  { 15716, -5450, -10010, 15929, -6665, -8952, 16036, -7835 },
-  { 15533, -13869, 6559, 3421, -12009, 15707, -13011, 5018 },
-  { 11357, -13726, 14841, -14600, 13025, -10259, 6556, -2254 },
-};
-#endif  // CONFIG_LGT
-#endif  // AOM_DSP_TXFM_COMMON_H_
+#endif  // AOM_AOM_DSP_TXFM_COMMON_H_

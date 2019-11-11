@@ -8,9 +8,10 @@
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
-#ifndef AOM_ACCOUNTING_H_
-#define AOM_ACCOUNTING_H_
+#ifndef AOM_AV1_DECODER_ACCOUNTING_H_
+#define AOM_AV1_DECODER_ACCOUNTING_H_
 #include <stdlib.h>
+#include "aom/aomdx.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,7 +42,7 @@ typedef struct {
 
 /** Dictionary for translating strings into id. */
 typedef struct {
-  char *(strs[MAX_SYMBOL_TYPES]);
+  char *strs[MAX_SYMBOL_TYPES];
   int num_strs;
 } AccountingDictionary;
 
@@ -57,8 +58,6 @@ typedef struct {
   /** Dictionary for translating strings into id. */
   AccountingDictionary dictionary;
 } AccountingSymbols;
-
-typedef struct Accounting Accounting;
 
 struct Accounting {
   AccountingSymbols syms;
@@ -80,4 +79,4 @@ void aom_accounting_dump(Accounting *accounting);
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
-#endif  // AOM_ACCOUNTING_H_
+#endif  // AOM_AV1_DECODER_ACCOUNTING_H_
