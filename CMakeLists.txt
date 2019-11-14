@@ -144,6 +144,8 @@ list(APPEND AOM_DECODER_APP_UTIL_SOURCES "${AOM_ROOT}/common/ivfdec.c"
 list(APPEND AOM_ENCODER_APP_UTIL_SOURCES
             "${AOM_ROOT}/common/ivfenc.c"
             "${AOM_ROOT}/common/ivfenc.h"
+            "${AOM_ROOT}/common/depthenc.c"
+            "${AOM_ROOT}/common/depthenc.h"
             "${AOM_ROOT}/common/video_writer.c"
             "${AOM_ROOT}/common/video_writer.h"
             "${AOM_ROOT}/common/warnings.c"
@@ -342,6 +344,9 @@ if(CONFIG_AV1_ENCODER)
     add_executable(simple_encoder "${AOM_ROOT}/examples/simple_encoder.c"
                                   $<TARGET_OBJECTS:aom_common_app_util>
                                   $<TARGET_OBJECTS:aom_encoder_app_util>)
+    add_executable(depth_container "${AOM_ROOT}/examples/depth_container.c"
+                                  $<TARGET_OBJECTS:aom_common_app_util>
+                                  $<TARGET_OBJECTS:aom_encoder_app_util>)
     add_executable(twopass_encoder "${AOM_ROOT}/examples/twopass_encoder.c"
                                    $<TARGET_OBJECTS:aom_common_app_util>
                                    $<TARGET_OBJECTS:aom_encoder_app_util>)
@@ -358,7 +363,7 @@ if(CONFIG_AV1_ENCODER)
 
     # Maintain a list of encoder example targets.
     list(APPEND AOM_ENCODER_EXAMPLE_TARGETS aomenc lossless_encoder noise_model
-                set_maps simple_encoder scalable_encoder twopass_encoder
+                set_maps simple_encoder depth_container scalable_encoder twopass_encoder
                 svc_encoder_rtc)
   endif()
 
