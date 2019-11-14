@@ -64,11 +64,10 @@ int main(int argc, char **argv) {
   dcfg.ratescale = 1;
   dcfg.rate = fps;
   frame_cnt = (int)strtol(framecount_arg, NULL, 0);
-  framesize = dcfg.frame_width * dcfg.frame_height * dcfg.bit_depth /
-              8
+  framesize = dcfg.frame_width * dcfg.frame_height * dcfg.bit_depth / 8;
 
-              if (dcfg.frame_width <= 0 || dcfg.frame_height <= 0 ||
-                  (dcfg.frame_width % 2) != 0 || (dcfg.frame_height % 2) != 0) {
+  if (dcfg.frame_width <= 0 || dcfg.frame_height <= 0 ||
+      (dcfg.frame_width % 2) != 0 || (dcfg.frame_height % 2) != 0) {
     die("Invalid frame size: %dx%d", dcfg.frame_width, dcfg.frame_height);
   }
 
